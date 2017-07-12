@@ -1,0 +1,159 @@
+#! /usr/bin/python
+# by pts@fazekas.hu at Mon Jul 10 23:16:21 CEST 2017
+
+import os
+import pipes
+import re
+import subprocess
+import sys
+
+NUM_RE = re.compile(r'(\d+)\Z')
+
+NUM_K_RE = re.compile(r'(\d+)k\Z')
+
+SIMPLE_RE = re.compile(r'[^a-zA-Z0-9]+')
+
+DOWNLOADED_FILENAME_RE = re.compile(
+    r'youtube_([-_a-zA-Z0-9]{11})_(.*)[.][.][.]~~~')
+
+
+def get_simple_title(title):
+  return SIMPLE_RE.sub('_', title).strip('_')
+
+
+def get_best_format(data):
+  mp4_audio_list = []
+  mp4_video_list = []
+  for line in data.split('\n'):
+    line = line.replace(' only', '-only').replace(',', ' ').replace('@  ', '@').replace('@ ', '@')
+    items = line.split()
+    if len(items) < 2:
+      continue
+    match = NUM_RE.match(items[0])
+    if not match:
+      continue
+    format_id = int(match.group(1))
+    format = items[1]
+    rates = [int(match.group(1)) for item in items
+             for match in (NUM_K_RE.match(item),) if match]
+    if len(rates) == 1:
+      rate = rates[0]
+    else:
+      rate = None
+    if format == 'm4a' and 'audio-only' in items and 'DASH' in items:
+      assert rate is not None, items
+      mp4_audio_list.append((rate, format_id))
+    if format == 'mp4' and 'video-only' in items:
+      assert rate is not None
+      mp4_video_list.append((rate, format_id))
+  # SUXX: The rate of a multiplexed file is not displayed.
+  assert mp4_audio_list
+  assert mp4_video_list
+  # TODO(pts): don't download larger than full HD
+  # TODO(pts): use webm or flv if it's the best
+  # TODO(pts): SUXX: sometimes the webm has some unexpectedly large resolution (640x360, also with old codec vp8.0), should be discarded.
+  #    [info] Available formats for YYYYYYYYYYY:
+  #    format code  extension  resolution note
+  #    139          m4a        audio only DASH audio   48k , m4a_dash container, mp4a.40.5@ 48k (22050Hz), 160.13KiB
+  #    249          webm       audio only DASH audio   50k , opus @ 50k, 161.69KiB
+  #    250          webm       audio only DASH audio   63k , opus @ 70k, 204.40KiB
+  #    171          webm       audio only DASH audio   91k , vorbis@128k, 291.51KiB
+  #    140          m4a        audio only DASH audio   97k , m4a_dash container, mp4a.40.2@128k (44100Hz), 318.80KiB
+  #    251          webm       audio only DASH audio  115k , opus @160k, 375.76KiB
+  #    278          webm       82x144     144p   57k , webm container, vp9, 15fps, video only, 124.22KiB
+  #    160          mp4        82x144     DASH video  110k , avc1.4d400c, 15fps, video only, 361.88KiB
+  #    242          webm       136x240    144p  163k , vp9, 30fps, video only, 384.46KiB
+  #    133          mp4        136x240    DASH video  246k , avc1.4d400d, 30fps, video only, 805.46KiB
+  #    134          mp4        204x360    DASH video  253k , avc1.4d400d, 30fps, video only, 764.68KiB
+  #    243          webm       204x360    240p  279k , vp9, 30fps, video only, 663.42KiB
+  #    244          webm       272x480    240p  405k , vp9, 30fps, video only, 1.03MiB
+  #    135          mp4        272x480    DASH video  488k , avc1.4d4015, 30fps, video only, 1.55MiB
+  #    17           3gp        176x144    small , mp4v.20.3, mp4a.40.2@ 24k
+  #    36           3gp        136x240    small , mp4v.20.3, mp4a.40.2
+  #    18           mp4        204x360    medium , avc1.42001E, mp4a.40.2@ 96k
+  #    43           webm       640x360    medium , vp8.0, vorbis@128k (best)
+  # TODO(pts): format=18 (multiplexed mp4) is larger
+  #    format=43 (multiplexed webm) is even larger
+  #    are these just scaleups?
+  #    format code  extension  resolution note
+  #    249          webm       audio only DASH audio   52k , opus @ 50k, 1.35MiB
+  #    250          webm       audio only DASH audio   69k , opus @ 70k, 1.74MiB
+  #    140          m4a        audio only DASH audio   95k , m4a_dash container, mp4a.40.2@128k, 2.59MiB
+  #    171          webm       audio only DASH audio   96k , vorbis@128k, 2.52MiB
+  #    251          webm       audio only DASH audio  123k , opus @160k, 3.21MiB
+  #    160          mp4        256x144    144p  113k , avc1.42c00c, 15fps, video only, 2.96MiB
+  #    278          webm       256x144    144p  155k , webm container, vp9, 15fps, video only, 2.47MiB
+  #    133          mp4        426x240    240p  246k , avc1.4d4015, 30fps, video only, 6.66MiB
+  #    242          webm       426x240    240p  260k , vp9, 30fps, video only, 6.23MiB
+  #    17           3gp        176x144    small , mp4v.20.3, mp4a.40.2@ 24k
+  #    36           3gp        320x180    small , mp4v.20.3, mp4a.40.2
+  #    18           mp4        568x320    medium , avc1.42001E, mp4a.40.2@ 96k
+  #    43           webm       640x360    medium , vp8.0, vorbis@128k (best)
+  return 'mp4', '%d+%d' % (max(mp4_video_list)[1], max(mp4_audio_list)[1])
+
+
+def download_youtube_video(id_or_url):
+  if len(id_or_url) == 11:
+    prefix = 'youtube_%s_' % id_or_url
+    if [1 for e in os.listdir('.') if e.startswith(prefix)]:
+      print >>sys.stderr, 'info: skipping already downloaded: %s' % id_or_url
+      return
+  p = subprocess.Popen(
+      ('youtube-dl', '-F', '--', id_or_url),
+      stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+  try:
+    p.stdin.close()
+    data = p.stdout.read()
+  finally:
+    exit_code = p.wait()
+  if exit_code:
+    # TODO(pts): ERROR: YYYYYYYYYYY: YouTube said: This video does not exist.
+    # RuntimeError: youtube-dl -F failed with exit code 1
+    raise RuntimeError('youtube-dl -F failed with exit code %d' % exit_code)
+  ext, format_spec = get_best_format(data)
+  tmp_prefix = 'youtubetmp.%d.' % os.getpid()
+  try:
+    # We need the ~~~ delimiter because youtube-dl is trying to be smart and
+    # appends .mp4 to the output filename after multiplexing.
+    cmd = ('youtube-dl', '-f', format_spec,
+           '-o', tmp_prefix + 'youtube_%(id)s_%(title)s...~~~', '--', id_or_url)
+    print >>sys.stderr, 'info: downloading with: %s' % (
+        ' '.join(map(pipes.quote, cmd)))
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    try:
+      p.stdin.close()
+    finally:
+      exit_code = p.wait()
+    if exit_code:
+      raise RuntimeError('youtube-dl failed with exit code %d' % exit_code)
+    filenames = [e for e in os.listdir('.') if e.startswith(tmp_prefix)]
+    if not filenames:
+      raise ValueError('Not files downloaded.')
+    if len(filenames) > 1:
+      raise ValueError('Multiple files downloaded: %r' % (filenames,))
+    match = DOWNLOADED_FILENAME_RE.match(filenames[0][len(tmp_prefix):])
+    if not match:
+      raise ValueError('Unrecognized downloaded filename: %s' % filenames[0])
+    youtube_id, title = match.group(1), match.group(2)
+    simple_title = get_simple_title(title)
+    saved_filename = 'youtube_%s_%s.%s' % (youtube_id, simple_title, ext)
+    print >>sys.stderr, (
+        'info: renaming downloaded video to: %s' % saved_filename)
+    os.rename(filenames[0], saved_filename)
+  finally:
+    # Cleanup: delete temporary files.
+    for entry in os.listdir('.'):
+      if entry.startswith(tmp_prefix):
+        try:
+          os.remove(entry)
+        except OSError:
+          pass
+
+
+def main(argv):
+  for arg in argv[1:]:
+    download_youtube_video(arg)
+
+
+if __name__ == '__main__':
+  sys.exit(main(sys.argv))
