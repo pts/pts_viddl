@@ -47,6 +47,8 @@ def get_best_format(data):
       assert rate is not None
       mp4_video_list.append((rate, format_id))
   # SUXX: The rate of a multiplexed file is not displayed.
+  return 'mp4', '%d+%d' % (max(mp4_video_list)[1], max(mp4_audio_list)[1])
+
   assert mp4_audio_list
   assert mp4_video_list
   # TODO(pts): don't download larger than full HD
@@ -105,7 +107,25 @@ def get_best_format(data):
   #    17           3gp        176x144    small , mp4v.20.3, mp4a.40.2@ 24k
   #    18           mp4        192x144    medium , avc1.42001E, mp4a.40.2@ 96k
   #    43           webm       640x360    medium , vp8.0, vorbis@128k (best)
-  return 'mp4', '%d+%d' % (max(mp4_video_list)[1], max(mp4_audio_list)[1])
+  # TODO(pts): [info] Available formats for YYYYYYYYYYY:
+  #   format code  extension  resolution note
+  #   139          m4a        audio only DASH audio   49k , m4a_dash container, mp4a.40.5@ 48k (22050Hz)
+  #   140          m4a        audio only DASH audio   96k , m4a_dash container, mp4a.40.2@128k (44100Hz)
+  #   160          mp4        256x144    DASH video  108k , avc1.4d400b, 30fps, video only
+  #   133          mp4        426x240    DASH video  264k , avc1.4d4015, 30fps, video only
+  #   17           3gp        176x144    small , mp4v.20.3, mp4a.40.2@ 24k
+  #   36           3gp        320x180    small , mp4v.20.3, mp4a.40.2
+  #   18           mp4        568x320    medium , avc1.42001E, mp4a.40.2@ 96k
+  #   43           webm       640x360    medium , vp8.0, vorbis@128k (best)
+  # Actual dimensions:
+  #   format=mp4 acodec=mp4a anch=2 arate=44100 asbits=16 has_early_mdat=1 hdr_done_at=3708155 height=240 minor_version=512 size=3708155 subformat=isom vcodec=h264 width=426 f=youtube_YYYYYYYYYYY_Title...+++.merged.mp4
+  #   format=mp4 acodec=mp4a anch=1 arate=44100 asbits=16 has_early_mdat=0 hdr_done_at=28651 height=320 minor_version=0 size=7720267 subformat=mp42 vcodec=h264 width=568 f=youtube_YYYYYYYYYYY_Title...+++.mp4
+  #   format=webm acodec=vorbis anch=1 arate=44100 asbits=32 hdr_done_at=4335 height=320 size=9293309 subformat=webm vcodec=vp8 width=568 f=youtube_YYYYYYYYYYY_Title...+++.webm
+  # Interpretation:
+  # * best .webm is not larger larger than best .mp4
+  # * `youtube-dl -F' is lying about the dimensions of .webm (-f 43): the lie is 640x360, actual is 568x320
+  # * .mp4 dimensions are as advertised (568x320 and 426x240)
+  # * largest single-file .mp4 (-f 18 568x320) is larger than the largest megrged .mp4 (426x240)  return 'mp4', '%d+%d' % (max(mp4_video_list)[1], max(mp4_audio_list)[1])
 
 
 def download_youtube_video(id_or_url):
