@@ -311,8 +311,16 @@ def download_youtube_video(id_or_url):
 
 
 def main(argv):
+  had_error = False
   for arg in argv[1:]:
-    download_youtube_video(arg)
+    try:
+      download_youtube_video(arg)
+    except (RuntimeError, ValueError), e:
+      print >>sys.stderr, 'error: %s.%s: %s' % (
+          e.__class__.__module__, e.__class__.__name__, e)
+      had_error = True
+  if had_error:
+    sys.exit(2)
 
 
 if __name__ == '__main__':
