@@ -16,11 +16,14 @@ files. It calls youtube-dl to do the work, but has improved best-quality
 detection (i.e. better than `youtube-dl -f bestvideo+bestaudio/best'), has
 better automatic output file naming, and can skip already downloaded videos.
 
-pts_viddl has much fewer features than youtube-dl (i.e. no command-line
-flags), and it supports only a few video hosting sites (e.g. youtube.com
-and facebook.com).
+pts_viddl has much fewer features than youtube-dl (i.e. just a few
+command-line flags), and it supports only a few video hosting sites (e.g.
+youtube.com and facebook.com).
 
-Usage: pts_viddl <video-url> ...
+Usage: pts_viddl [<flag> ...] <video-url> ...
+Flags:
+-f format: Audio and video formats to download. Like youtube-dl, but also
+  supports bestfixed (default).
 """
 
 # TODO(pts): Fail on disk full. How to detect it? media_scan.py mp4 errors?
@@ -57,8 +60,8 @@ VIDRES_RE = re.compile(r'(\d+)x(\d+)\Z')
 SIMPLE_RE = re.compile(r'[^a-zA-Z0-9]+')
 
 DOWNLOADED_FILENAME_RE = re.compile(
-    r'ptsviddl_(.*?)~~~[.][.][.](.*)[.][.][.]~~~')
-DOWNLOADED_FILENAME_FORMAT = 'ptsviddl_%(id)s~~~...%(title)s...~~~'
+    r'ptsviddl_(.*?)~~~[.][.][.](.*)[.][.][.]~~~[.](\w+)')
+DOWNLOADED_FILENAME_FORMAT = 'ptsviddl_%(id)s~~~...%(title)s...~~~.%(ext)s'
 
 YOUTUBE_VIDEO_URL_RE = re.compile(
     r'(?:https?://(?:\w+[.])?(?:youtube[.]com)/watch[?]v=|'
@@ -203,7 +206,7 @@ def get_dimens(vidres):
   return int(match.group(1)), int(match.group(2))
 
 
-def get_best_format(data):
+def get_bestfixed_format(data):
   """Returns (ext, format_spec)."""
   # We ignore videos with larger than Full HD resolution. Then
   # we consider these videos: mp4 (video-only and multiplexed) and non-mp4
@@ -291,7 +294,7 @@ def get_filename_prefix(id_or_url):
   return None
 
 
-def download_video(id_or_url):
+def download_video(id_or_url, format='bestfixed'):
   url = fix_url(id_or_url)
   filename_prefix = get_filename_prefix(url)
   if filename_prefix is not None:
@@ -300,24 +303,27 @@ def download_video(id_or_url):
           filename_prefix, id_or_url, url)
       return
   del id_or_url
-  p = subprocess.Popen(
-      ('youtube-dl', '-F', '--', url),
-      stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-  try:
-    p.stdin.close()
-    data = p.stdout.read()
-  finally:
-    exit_code = p.wait()
-  if exit_code:
-    # TODO(pts): ERROR: YYYYYYYYYYY: YouTube said: This video does not exist.
-    # RuntimeError: youtube-dl -F failed with exit code 1
-    raise RuntimeError('youtube-dl -F failed with exit code %d' % exit_code)
-  ext, format_spec = get_best_format(data)
+  format_items = format.split('/')
+  if format_items[0] == 'bestfixed':
+    p = subprocess.Popen(
+        ('youtube-dl', '-F', '--', url),
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    try:
+      p.stdin.close()
+      data = p.stdout.read()
+    finally:
+      exit_code = p.wait()
+    if exit_code:
+      # TODO(pts): ERROR: YYYYYYYYYYY: YouTube said: This video does not exist.
+      # RuntimeError: youtube-dl -F failed with exit code 1
+      raise RuntimeError('youtube-dl -F failed with exit code %d' % exit_code)
+    unused_ext, format_items[0] = get_bestfixed_format(data)
+  format = '/'.join(format_items)
   tmp_prefix = 'ptsviddltmp.%d.' % os.getpid()
   try:
     # We need the ~~~ delimiter because youtube-dl is trying to be smart and
     # appends .mp4 to the output filename after multiplexing.
-    cmd = ['youtube-dl', '-f', format_spec]
+    cmd = ['youtube-dl', '-f', format]
     if filename_prefix.startswith('facebookvid_'):
       # Many retries after ``Connection reset by peer''.
       cmd.extend(('-R', '200'))
@@ -341,7 +347,7 @@ def download_video(id_or_url):
     match = DOWNLOADED_FILENAME_RE.match(filenames[0][len(tmp_prefix):])
     if not match:
       raise ValueError('Unrecognized downloaded filename: %s' % filenames[0])
-    video_id, title = match.group(1), match.group(2)
+    video_id, title, ext = match.group(1), match.group(2), match.group(3)
     simple_title = get_simple_title(title, filename_prefix)
     saved_filename = '%s%s.%s' % (filename_prefix, simple_title, ext)
     print >>sys.stderr, (
@@ -361,6 +367,7 @@ def main(argv):
   if len(argv) < 2 or argv[1] == '--help':
     print get_doc()
     sys.exit(0)
+  format = 'bestfixed'
   i = 1
   while i < len(argv):
     arg = argv[i]
@@ -369,11 +376,18 @@ def main(argv):
     i += 1
     if arg == '--':
       break
-    sys.exit('fatal: unknown command-line flag: %s' % arg)
+    elif arg == '-f':
+      if i == len(argv):
+        sys.exit('fatal: missing argument of: %s' % arg)
+      format = argv[i]
+      i += 1
+    else:
+      sys.exit('fatal: unknown command-line flag: %s' % arg)
+
   had_error = False
-  for arg in argv[i:]:
+  for id_or_url in argv[i:]:
     try:
-      download_video(arg)
+      download_video(id_or_url, format)
     except (RuntimeError, ValueError), e:
       print >>sys.stderr, 'error: %s.%s: %s' % (
           e.__class__.__module__, e.__class__.__name__, e)
