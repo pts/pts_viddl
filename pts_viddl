@@ -69,6 +69,8 @@ YOUTUBE_VIDEO_URL_RE = re.compile(
     r')([-\w]{11})(?:\Z|[/?&\#])')
 FACEBOOK_VIDEO_URL_RE = re.compile(
     r'https?://(?:\w+[.])?facebook[.]com/([^/?&]+)/videos/(\d+)(?:[/?]|\Z)')
+XHAMSTER_VIDEO_URL_RE = re.compile(
+    r'https?://((?:\w+[.])?xhamster[.]com/videos/[^/?&]*-(\d+))(?:[/?]|\Z)')
 ANY_VIDEO_URL_RE = re.compile(r'https?://(?:[^@/]*@)?([^#?%@:/&+]+)')
 
 
@@ -323,6 +325,9 @@ def fix_url(id_or_url):
   match = FACEBOOK_VIDEO_URL_RE.match(id_or_url)
   if match:
     return 'https://facebook.com/%s/videos/%s' % (match.group(1), match.group(2))
+  match = XHAMSTER_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    return 'https://%s' % match.group(1)
   match = ANY_VIDEO_URL_RE.match(id_or_url)
   if match:
     print >>sys.stderr, 'warning: unknown site for video: %s' % id_or_url
@@ -337,6 +342,9 @@ def get_filename_prefix(id_or_url):
   match = FACEBOOK_VIDEO_URL_RE.match(id_or_url)
   if match:
     return 'facebookvid_%s_' % match.group(2)
+  match = XHAMSTER_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    return 'xhamster_%s_' % match.group(2)
   match = ANY_VIDEO_URL_RE.match(id_or_url)
   if match:
     # Convert es.xhamster.com to dlvid-xhamster-com_%(id)s_
