@@ -1,6 +1,28 @@
-#! /usr/bin/python
+#! /bin/sh
 # by pts@fazekas.hu at Mon Jul 10 23:16:21 CEST 2017
-#
+
+""":" #pts_viddl: best-quality video downloader
+
+type python2.7 >/dev/null 2>&1 && exec python2.7 -- "$0" ${1+"$@"}
+type python2.6 >/dev/null 2>&1 && exec python2.6 -- "$0" ${1+"$@"}
+type python2.5 >/dev/null 2>&1 && exec python2.5 -- "$0" ${1+"$@"}
+type python2.4 >/dev/null 2>&1 && exec python2.4 -- "$0" ${1+"$@"}
+exec python -- ${1+"$@"}; exit 1
+
+This is free software, GNU GPL >=2.0. There is NO WARRANTY. Use at your risk.
+
+pts_viddl is a command-line tool written in Python 2.x for downloading video
+files. It calls youtube-dl to do the work, but has improved best-quality
+detection (i.e. better than `youtube-dl -f bestvideo+bestaudio/best'), has
+better automatic output file naming, and can skip already downloaded videos.
+
+pts_viddl has much fewer features than youtube-dl (i.e. no command-line
+flags), and it supports only a few video hosting sites (e.g. youtube.com
+and facebook.com).
+
+Usage: pts_viddl <video-url> ...
+"""
+
 # TODO(pts): Fail on disk full. How to detect it? media_scan.py mp4 errors?
 #
 
@@ -9,6 +31,20 @@ import pipes
 import re
 import subprocess
 import sys
+
+def get_module_docstring():
+  return __doc__
+
+
+def get_doc(doc=None):
+  if doc is None:
+    doc = get_module_docstring()
+  doc = doc.rstrip()
+  doc = re.sub(r'\A:"\s*#', '', doc, 1)
+  doc = re.sub(r'\n(\ntype python.*)+\nexec python -- .*', '', doc, 1)
+  doc = re.sub('\n\n(?=This is free software)', '\n', doc, 1)
+  return doc
+
 
 # Not including 'dash_...' on facebook.com, because it doesn't contain
 # resolution (and its actual resolution is maxed out at 1280x720).
@@ -169,7 +205,7 @@ def get_dimens(vidres):
 
 def get_best_format(data):
   """Returns (ext, format_spec)."""
-  # We ignore videos with larger than FullHD resolution. Then
+  # We ignore videos with larger than Full HD resolution. Then
   # we consider these videos: mp4 (video-only and multiplexed) and non-mp4
   # non-webm multiplexed. We choose the best by taking the largest (width *
   # height, int(is_video_only), rate). If we've chosen a video-only mp4,
@@ -322,6 +358,9 @@ def download_video(id_or_url):
 
 
 def main(argv):
+  if len(argv) < 2 or argv[1] == '--help':
+    print get_doc()
+    sys.exit(0)
   had_error = False
   for arg in argv[1:]:
     try:
