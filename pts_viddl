@@ -18,7 +18,7 @@ better automatic output file naming, and can skip already downloaded videos.
 
 pts_viddl has much fewer features than youtube-dl (i.e. just a few
 command-line flags), and it supports only a few video hosting sites (e.g.
-youtube.com and facebook.com).
+youtube.com and facebook.com explicitly and some more implicitly).
 
 Usage: pts_viddl [<flag> ...] <video-url> ...
 Flags:
@@ -32,6 +32,7 @@ Flags:
 #
 
 import os
+import os.path
 import pipes
 import re
 import subprocess
@@ -51,10 +52,6 @@ def get_doc(doc=None):
   return doc
 
 
-# Not including 'dash_...' on facebook.com, because it doesn't contain
-# resolution (and its actual resolution is maxed out at 1280x720).
-FORMAT_CODE_RE = re.compile(r'(\d+|\d+[av]d?)\Z')
-
 NUM_K_RE = re.compile(r'(\d+)k\Z')
 
 VIDRES_RE = re.compile(r'(\d+)x(\d+)\Z')
@@ -72,7 +69,7 @@ YOUTUBE_VIDEO_URL_RE = re.compile(
     r')([-\w]{11})(?:\Z|[/?&\#])')
 FACEBOOK_VIDEO_URL_RE = re.compile(
     r'https?://(?:\w+[.])?facebook[.]com/([^/?&]+)/videos/(\d+)(?:[/?]|\Z)')
-ANY_VIDEO_URL_RE = re.compile(r'https?://')
+ANY_VIDEO_URL_RE = re.compile(r'https?://(?:[^@/]*@)?([^#?%@:/&+]+)')
 
 
 def get_simple_title(title, filename_prefix=''):
@@ -87,20 +84,41 @@ assert '' == get_simple_title('Facebook video #123456789012345', 'facebookvid_12
 assert 'Hell_W_rld', get_simple_title('Hell\xc3\xb3,  W\xc3\xb6rld!')
 
 
+HARDCODED_VIDRESES = {
+    '4320p': (7680, 4320),  # 16:9.
+    '2160p': (3840, 2160),  # 16:9.
+    '1440p': (2560, 1440),  # 16:9.
+    '1080p': (1920, 1080),  # 16:9.
+    '720p': (1280, 720),  # 16:9.
+    '480p': (840, 480),
+    '360p': (640, 360),
+    '240p': (426, 240),
+    '144p': (256, 144),
+    # '480p': (720, 480),  # 3:2.
+    # '240p': (360, 240),  # 3:2.
+}
+
+
+def parse_vidres(item):
+  """Returns (width, height)."""
+  match = VIDRES_RE.match(item)
+  if match:
+    return int(match.group(1)), int(match.group(2))
+  return HARDCODED_VIDRESES.get(item)  # Can be None.
+
+
 def yield_ainfos(data):
   mp4_audio_list = []
   mp4_video_list = []
   for line in data.split('\n'):
     line = line.replace(' only', '-only').replace(',', ' ').replace('@', ' ')
     line = (line + ' ').replace(' (', ' ').replace(') ', ' ')
+    if not line or line.startswith('[') or line.startswith('format code'):
+      continue
     items = line.split()
     if len(items) < 2:
       continue
-    match = FORMAT_CODE_RE.match(items[0])
-    if not match:
-      continue
-    format_code = match.group(1)
-    format = items[1]
+    format_code, format = items[:2]
     del items[:2]  # format_code and format.
     rates = [int(match.group(1)) for item in items
              for match in (NUM_K_RE.match(item),) if match]
@@ -108,9 +126,14 @@ def yield_ainfos(data):
       rate = rates[0]
     else:
       rate = None
-    matches = [item for item in items if VIDRES_RE.match(item)]
-    assert len(matches) <= 1, matches
-    vidres = (matches or (None,))[0]
+    vidres = None
+    if items:
+      vidreses = [parse_vidres(items[0])]
+      if vidreses[0] is None:
+        vidreses = sorted(set(filter(None, map(parse_vidres, items))))
+        assert len(vidreses) <= 1, (vidreses, items)
+      if vidreses:
+        vidres = '%dx%d' % vidreses[0]
     is_audio_only = 'audio-only' in items
     is_video_only = 'video-only' in items
     if is_audio_only:
@@ -125,11 +148,19 @@ def yield_ainfos(data):
       items = [item for item in items if item != 'video-only' and item != 'video']
       xtype = 'video-only'
       assert vidres, items
+    elif len(items) == 1 and items[0] == 'unknown' and not vidres:
+      # Fallback if only 1 option available, e.g. sendvid.com.
+      xtype = 'both'
+      vidres = '0x0'
+    elif len(items) == 2 and items[0] == 'unknown' and items[1] == 'best' and not vidres:
+      # Fallback if only 1 option available, e.g. sendvid.com.
+      xtype = 'both'
+      vidres = '0x0'
     else:
       xtype = 'both'
       assert vidres, items
       items = [item for item in items if item != 'audio' and item != 'video']
-    items = [item for item in items if not NUM_K_RE.match(item) and not VIDRES_RE.match(item)]
+    items = [item for item in items if not NUM_K_RE.match(item) and not parse_vidres(item)]
     yield (format_code, format, xtype, vidres, rates, sorted(items))
 
 
@@ -139,18 +170,18 @@ assert (
     ('250', 'webm', 'audio-only', None, [93, 70], ['3.24MiB', 'DASH', 'opus']),
     ('140', 'm4a', 'audio-only', None, [130, 128], ['6.80MiB', 'DASH', 'container', 'm4a_dash', 'mp4a.40.2']),
     ('251', 'webm', 'audio-only', None, [171, 160], ['5.91MiB', 'DASH', 'opus']),
-    ('160', 'mp4', 'video-only', '256x144', [110], ['144p', '24fps', '4.04MiB', 'avc1.4d400c']),
-    ('278', 'webm', 'video-only', '256x144', [117], ['144p', '24fps', '5.27MiB', 'container', 'vp9', 'webm']),
-    ('242', 'webm', 'video-only', '426x240', [219], ['240p', '24fps', '8.51MiB', 'vp9']),
-    ('133', 'mp4', 'video-only', '426x240', [234], ['240p', '24fps', '8.38MiB', 'avc1.4d4015']),
-    ('243', 'webm', 'video-only', '640x360', [401], ['15.20MiB', '24fps', '360p', 'vp9']),
-    ('134', 'mp4', 'video-only', '640x360', [457], ['15.92MiB', '24fps', '360p', 'avc1.4d401e']),
-    ('244', 'webm', 'video-only', '854x480', [641], ['22.86MiB', '24fps', '480p', 'vp9']),
-    ('135', 'mp4', 'video-only', '854x480', [687], ['24.03MiB', '24fps', '480p', 'avc1.4d401e']),
-    ('136', 'mp4', 'video-only', '1280x720', [950], ['24fps', '34.61MiB', '720p', 'avc1.4d401f']),
-    ('247', 'webm', 'video-only', '1280x720', [1195], ['24fps', '42.46MiB', '720p', 'vp9']),
-    ('248', 'webm', 'video-only', '1920x1080', [2680], ['1080p', '124.98MiB', '24fps', 'vp9']),
-    ('137', 'mp4', 'video-only', '1920x1080', [3296], ['1080p', '125.73MiB', '24fps', 'avc1.640028']),
+    ('160', 'mp4', 'video-only', '256x144', [110], ['24fps', '4.04MiB', 'avc1.4d400c']),
+    ('278', 'webm', 'video-only', '256x144', [117], ['24fps', '5.27MiB', 'container', 'vp9', 'webm']),
+    ('242', 'webm', 'video-only', '426x240', [219], ['24fps', '8.51MiB', 'vp9']),
+    ('133', 'mp4', 'video-only', '426x240', [234], ['24fps', '8.38MiB', 'avc1.4d4015']),
+    ('243', 'webm', 'video-only', '640x360', [401], ['15.20MiB', '24fps', 'vp9']),
+    ('134', 'mp4', 'video-only', '640x360', [457], ['15.92MiB', '24fps', 'avc1.4d401e']),
+    ('244', 'webm', 'video-only', '854x480', [641], ['22.86MiB', '24fps', 'vp9']),
+    ('135', 'mp4', 'video-only', '854x480', [687], ['24.03MiB', '24fps', 'avc1.4d401e']),
+    ('136', 'mp4', 'video-only', '1280x720', [950], ['24fps', '34.61MiB', 'avc1.4d401f']),
+    ('247', 'webm', 'video-only', '1280x720', [1195], ['24fps', '42.46MiB', 'vp9']),
+    ('248', 'webm', 'video-only', '1920x1080', [2680], ['124.98MiB', '24fps', 'vp9']),
+    ('137', 'mp4', 'video-only', '1920x1080', [3296], ['125.73MiB', '24fps', 'avc1.640028']),
     ('43', 'webm', 'both', '640x360', [128], ['44.09MiB', 'medium', 'vorbis', 'vp8.0']),
     ('18', 'mp4', 'both', '640x360', [616, 96], ['32.39MiB', '44100Hz', 'avc1.42001E', 'medium', 'mp4a.40.2']),
     ('22', 'mp4', 'both', '1280x720', [2178, 192], ['44100Hz', 'avc1.64001F', 'best', 'hd720', 'mp4a.40.2']),
@@ -186,6 +217,9 @@ assert (
     ('735153476916781v', 'mp4', 'video-only', '852x480', [1631], ['DASH', '[eng]', 'avc1.4D401F', 'container', 'mp4_dash']),
     ('446115632656220v', 'mp4', 'video-only', '1280x720', [3223], ['DASH', '[eng]', 'avc1.4D401F', 'container', 'mp4_dash']),
     ('2358600094466962v', 'mp4', 'video-only', '1920x1080', [7370], ['DASH', '[eng]', 'avc1.4D4028', 'container', 'mp4_dash']),
+    ('dash_sd_src', 'mp4', 'both', '0x0', [], ['unknown']),
+    ('dash_sd_src_no_ratelimit', 'mp4', 'both', '0x0', [], ['unknown']),
+    ('dash_hd_src', 'mp4', 'both', '0x0', [], ['best', 'unknown']),
 ) == tuple(yield_ainfos(r"""
 format code               extension  resolution note
 295505227957623ad         m4a        audio only [eng] DASH audio   65k , m4a_dash container, mp4a.40.5 (48000Hz)
@@ -200,12 +234,22 @@ dash_sd_src_no_ratelimit  mp4        unknown
 dash_hd_src               mp4        unknown    (best)
 """.strip('\n')))
 
-
-def get_dimens(vidres):
-  """Returns (width, height)."""
-  match = VIDRES_RE.match(vidres)
-  assert match, vidres
-  return int(match.group(1)), int(match.group(2))
+# From xhamster.com.
+assert (
+    ('mp4-144p', 'mp4', 'both', '256x144', [], []),
+    ('mp4-240p', 'mp4', 'both', '426x240', [], []),
+    ('mp4-480p', 'mp4', 'both', '840x480', [], []),
+    ('mp4-720p', 'mp4', 'both', '1280x720', [], []),
+    ('mp4-2160p', 'mp4', 'both', '3840x2160', [], ['best']),
+) == tuple(yield_ainfos(r"""
+[info] Available formats for 1234567:
+format code  extension  resolution note
+mp4-144p     mp4        144p
+mp4-240p     mp4        240p
+mp4-480p     mp4        480p
+mp4-720p     mp4        720p
+mp4-2160p    mp4        2160p      (best)
+""".strip('\n')))
 
 
 def get_bestfixed_format(data):
@@ -231,7 +275,7 @@ def get_bestfixed_format(data):
       (a[RATES][0], a[FORMAT_ID]) for a in ainfos
       if a[FORMAT] == 'm4a' and a[XTYPE] == 'audio-only')
   vid_list = sorted(
-      (multiply(*get_dimens(a[VIDRES])), int(a[XTYPE] == 'video-only'), (a[RATES] or (1,))[0], a[FORMAT_ID], a[FORMAT])
+      (multiply(*parse_vidres(a[VIDRES])), int(a[XTYPE] == 'video-only'), (a[RATES] or (1,))[0], a[FORMAT_ID], a[FORMAT])
       for a in ainfos
       if (a[FORMAT] == 'mp4' and a[XTYPE] in ('video-only', 'both'))
       or (a[FORMAT] not in ('mp4', 'webm') and a[XTYPE] == 'both'))
@@ -281,7 +325,7 @@ def fix_url(id_or_url):
     return 'https://facebook.com/%s/videos/%s' % (match.group(1), match.group(2))
   match = ANY_VIDEO_URL_RE.match(id_or_url)
   if match:
-    print >>sys.stderr, 'warning; unknown site for video: %s' % id_or_url
+    print >>sys.stderr, 'warning: unknown site for video: %s' % id_or_url
     return id_or_url  # Don't change https:// to http:// by default.
   raise ValueError('Not a video ID or URL: %s' % id_or_url)
 
@@ -293,6 +337,11 @@ def get_filename_prefix(id_or_url):
   match = FACEBOOK_VIDEO_URL_RE.match(id_or_url)
   if match:
     return 'facebookvid_%s_' % match.group(2)
+  match = ANY_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    # Convert es.xhamster.com to dlvid-xhamster-com_%(id)s_
+    return 'dlvid-%s_%%(id)s_' % get_simple_title(
+        '.'.join(match.group(1).split('.')[-2:])).replace('_', '-')
   return None
 
 
@@ -314,8 +363,8 @@ def get_video_format_data(url):
 
 def download_video(id_or_url, format='bestfixed'):
   url = fix_url(id_or_url)
-  filename_prefix = get_filename_prefix(url)
-  if filename_prefix is not None:
+  filename_prefix = get_filename_prefix(url) or ''
+  if filename_prefix and '%(' not in filename_prefix:
     if [1 for e in os.listdir('.') if e.startswith(filename_prefix)]:
       print >>sys.stderr, 'info: skipping already downloaded: %s: %s: %s' % (
           filename_prefix, id_or_url, url)
@@ -355,8 +404,20 @@ def download_video(id_or_url, format='bestfixed'):
     if not match:
       raise ValueError('Unrecognized downloaded filename: %s' % filenames[0])
     video_id, title, ext = match.group(1), match.group(2), match.group(3)
+    if '%(' in filename_prefix:
+      values = {'id': video_id, 'title': title, 'ext': ext}
+      filename_prefix = filename_prefix % values  # Apply format template.
     simple_title = get_simple_title(title, filename_prefix)
-    saved_filename = '%s%s.%s' % (filename_prefix, simple_title, ext)
+    saved_filename = '%s%s.%s' % (
+        filename_prefix or 'dlvid_', simple_title, ext)
+    i = 0
+    while os.path.exists(saved_filename):
+      i += 1
+      # Don't overwrite existing files. (This detection has a race condition
+      # causing an unintended overwrite if multiple programs are creating
+      # files in the directory at the same time.)
+      saved_filename = '%s%s-%d.%s' % (
+          filename_prefix or 'dlvid_', simple_title, i, ext)
     print >>sys.stderr, (
         'info: renaming downloaded video to: %s' % saved_filename)
     os.rename(filenames[0], saved_filename)

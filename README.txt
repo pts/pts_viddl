@@ -5,9 +5,9 @@ files. It calls youtube-dl to do the work, but has improved best-quality
 detection (i.e. better than `youtube-dl -f bestvideo+bestaudio/best'), has
 better automatic output file naming, and can skip already downloaded videos.
 
-pts_viddl has much fewer features than youtube-dl (i.e. no command-line
-flags), and it supports only a few video hosting sites (e.g. youtube.com
-and facebook.com).
+pts_viddl has much fewer features than youtube-dl (i.e. just a few
+command-line flags), and it supports only a few video hosting sites (e.g.
+youtube.com and facebook.com explicitly and some more implicitly).
 
 pts_viddl is free software, GNU GPL >=2.0. There is NO WARRANTY. Use at your
 own risk.
