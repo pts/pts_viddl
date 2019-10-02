@@ -361,8 +361,17 @@ def main(argv):
   if len(argv) < 2 or argv[1] == '--help':
     print get_doc()
     sys.exit(0)
+  i = 1
+  while i < len(argv):
+    arg = argv[i]
+    if arg == '-' or not arg.startswith('-'):
+      break
+    i += 1
+    if arg == '--':
+      break
+    sys.exit('fatal: unknown command-line flag: %s' % arg)
   had_error = False
-  for arg in argv[1:]:
+  for arg in argv[i:]:
     try:
       download_video(arg)
     except (RuntimeError, ValueError), e:
