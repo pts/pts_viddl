@@ -24,6 +24,8 @@ Usage: pts_viddl [<flag> ...] <video-url> ...
 Flags:
 -f format: Audio and video formats to download. Like youtube-dl, but also
   supports bestfixed (default).
+-F: Instead of downloading, query the availabel video and audio formats.
+  Like youtube-dl.
 """
 
 # TODO(pts): Fail on disk full. How to detect it? media_scan.py mp4 errors?
@@ -294,6 +296,22 @@ def get_filename_prefix(id_or_url):
   return None
 
 
+def get_video_format_data(url):
+  p = subprocess.Popen(
+      ('youtube-dl', '-F', '--', url),
+      stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+  try:
+    p.stdin.close()
+    data = p.stdout.read()
+  finally:
+    exit_code = p.wait()
+  if exit_code:
+    # TODO(pts): ERROR: YYYYYYYYYYY: YouTube said: This video does not exist.
+    # RuntimeError: youtube-dl -F failed with exit code 1
+    raise RuntimeError('youtube-dl -F failed with exit code %d' % exit_code)
+  return data
+
+
 def download_video(id_or_url, format='bestfixed'):
   url = fix_url(id_or_url)
   filename_prefix = get_filename_prefix(url)
@@ -305,18 +323,7 @@ def download_video(id_or_url, format='bestfixed'):
   del id_or_url
   format_items = format.split('/')
   if format_items[0] == 'bestfixed':
-    p = subprocess.Popen(
-        ('youtube-dl', '-F', '--', url),
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    try:
-      p.stdin.close()
-      data = p.stdout.read()
-    finally:
-      exit_code = p.wait()
-    if exit_code:
-      # TODO(pts): ERROR: YYYYYYYYYYY: YouTube said: This video does not exist.
-      # RuntimeError: youtube-dl -F failed with exit code 1
-      raise RuntimeError('youtube-dl -F failed with exit code %d' % exit_code)
+    data = get_video_format_data(url)
     unused_ext, format_items[0] = get_bestfixed_format(data)
   format = '/'.join(format_items)
   tmp_prefix = 'ptsviddltmp.%d.' % os.getpid()
@@ -363,11 +370,17 @@ def download_video(id_or_url, format='bestfixed'):
           pass
 
 
+def query_video_format(id_or_url):
+  url = fix_url(id_or_url)
+  sys.stdout.write(get_video_format_data(url))
+
+
 def main(argv):
   if len(argv) < 2 or argv[1] == '--help':
     print get_doc()
     sys.exit(0)
   format = 'bestfixed'
+  is_format_query = False
   i = 1
   while i < len(argv):
     arg = argv[i]
@@ -381,13 +394,18 @@ def main(argv):
         sys.exit('fatal: missing argument of: %s' % arg)
       format = argv[i]
       i += 1
+    elif arg == '-F':
+      is_format_query = True
     else:
       sys.exit('fatal: unknown command-line flag: %s' % arg)
 
   had_error = False
   for id_or_url in argv[i:]:
     try:
-      download_video(id_or_url, format)
+      if is_format_query:
+        query_video_format(id_or_url)
+      else:
+        download_video(id_or_url, format)
     except (RuntimeError, ValueError), e:
       print >>sys.stderr, 'error: %s.%s: %s' % (
           e.__class__.__module__, e.__class__.__name__, e)
