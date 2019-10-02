@@ -17,6 +17,11 @@ https://youtube-dl.org/ .
 
 How best-quality detection works in pts_viddl:
 
+* If the command-line flag `-f ...' is specified, then best-quality
+  detection is disabled, and the specified format is passed to youtube-dl
+  directly. It's recommended not to disable best-quality detection, but if
+  you disable it anyway, then here are the recommended values:
+  `-f best' or `-f bestvideo+bestaudio/best'.
 * It runs `youtube-dl -F' to query the available audio and video formats.
 * It ignores videos with larger than Full HD resolution.
 * It considers these videos: mp4 (video-only and multiplexed) and non-mp4
