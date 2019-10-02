@@ -378,6 +378,8 @@ def download_video(id_or_url, format='bestfixed'):
           filename_prefix, id_or_url, url)
       return
   del id_or_url
+  print >>sys.stderr, 'info: using prefix %s and URL %s' % (
+      filename_prefix, url)
   format_items = format.split('/')
   if format_items[0] == 'bestfixed':
     data = get_video_format_data(url)
