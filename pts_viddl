@@ -68,7 +68,7 @@ YOUTUBE_VIDEO_URL_RE = re.compile(
     r'https?://(?:youtu[.]be|(?:www[.])?youtube[.]com/v)/|'
     r')([-\w]{11})(?:\Z|[/?&\#])')
 FACEBOOK_VIDEO_URL_RE = re.compile(
-    r'https?://(?:\w+[.])?facebook[.]com/([^/?&]+)/videos/(\d+)(?:[/?]|\Z)')
+    r'https?://(?:\w+[.])?facebook[.]com/([^/?&]+)/videos/(?:vl[.]\d+/)?(\d+)(?:[/?]|\Z)')
 XHAMSTER_VIDEO_URL_RE = re.compile(
     r'https?://((?:\w+[.])?xhamster[.]com/videos/[^/?&]*-(\d+))(?:[/?]|\Z)')
 ANY_VIDEO_URL_RE = re.compile(r'https?://(?:[^@/]*@)?([^#?%@:/&+]+)')
