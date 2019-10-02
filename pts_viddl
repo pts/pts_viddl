@@ -10,7 +10,9 @@ import re
 import subprocess
 import sys
 
-NUM_RE = re.compile(r'(\d+)\Z')
+# Not including 'dash_...' on facebook.com, because it doesn't contain
+# resolution (and its actual resolution is maxed out at 1280x720).
+FORMAT_CODE_RE = re.compile(r'(\d+|\d+[av]d?)\Z')
 
 NUM_K_RE = re.compile(r'(\d+)k\Z')
 
@@ -19,11 +21,29 @@ VIDRES_RE = re.compile(r'(\d+)x(\d+)\Z')
 SIMPLE_RE = re.compile(r'[^a-zA-Z0-9]+')
 
 DOWNLOADED_FILENAME_RE = re.compile(
-    r'youtube_([-_a-zA-Z0-9]{11})_(.*)[.][.][.]~~~')
+    r'ptsviddl_(.*?)~~~[.][.][.](.*)[.][.][.]~~~')
+DOWNLOADED_FILENAME_FORMAT = 'ptsviddl_%(id)s~~~...%(title)s...~~~'
+
+YOUTUBE_VIDEO_URL_RE = re.compile(
+    r'(?:https?://(?:\w+[.])?(?:youtube[.]com)/watch[?]v=|'
+    r'https?://(?:\w+[.])?(?:(?:youtube|yourepeat|youtuberepeater)[.](?:com|it)/(?:watch|watch_popup|view_play_list)/?[?])(?:[^&]*&)*?v=|'
+    r'https?://(?:youtu[.]be|(?:www[.])?youtube[.]com/v)/|'
+    r')([-\w]{11})(?:\Z|[/?&\#])')
+FACEBOOK_VIDEO_URL_RE = re.compile(
+    r'https?://(?:\w+[.])?facebook[.]com/([^/?&]+)/videos/(\d+)(?:[/?]|\Z)')
+ANY_VIDEO_URL_RE = re.compile(r'https?://')
 
 
-def get_simple_title(title):
+def get_simple_title(title, filename_prefix=''):
+  if (filename_prefix.startswith('facebookvid_') and
+      title.startswith('Facebook video #') and
+      filename_prefix.split('_')[1] == title.split('#', 1)[1]):
+    return ''  # Redundant title. (youtube-dl always gives this.)
   return SIMPLE_RE.sub('_', title).strip('_')
+
+
+assert '' == get_simple_title('Facebook video #123456789012345', 'facebookvid_123456789012345_')
+assert 'Hell_W_rld', get_simple_title('Hell\xc3\xb3,  W\xc3\xb6rld!')
 
 
 def yield_ainfos(data):
@@ -35,12 +55,12 @@ def yield_ainfos(data):
     items = line.split()
     if len(items) < 2:
       continue
-    match = NUM_RE.match(items[0])
+    match = FORMAT_CODE_RE.match(items[0])
     if not match:
       continue
-    format_id = int(match.group(1))
+    format_code = match.group(1)
     format = items[1]
-    del items[:2]  # format_id and format.
+    del items[:2]  # format_code and format.
     rates = [int(match.group(1)) for item in items
              for match in (NUM_K_RE.match(item),) if match]
     if len(rates) == 1:
@@ -69,7 +89,75 @@ def yield_ainfos(data):
       assert vidres, items
       items = [item for item in items if item != 'audio' and item != 'video']
     items = [item for item in items if not NUM_K_RE.match(item) and not VIDRES_RE.match(item)]
-    yield (format_id, format, xtype, vidres, rates, sorted(items))
+    yield (format_code, format, xtype, vidres, rates, sorted(items))
+
+
+# From youtube.com.
+assert (
+    ('249', 'webm', 'audio-only', None, [71, 50], ['2.56MiB', 'DASH', 'opus']),
+    ('250', 'webm', 'audio-only', None, [93, 70], ['3.24MiB', 'DASH', 'opus']),
+    ('140', 'm4a', 'audio-only', None, [130, 128], ['6.80MiB', 'DASH', 'container', 'm4a_dash', 'mp4a.40.2']),
+    ('251', 'webm', 'audio-only', None, [171, 160], ['5.91MiB', 'DASH', 'opus']),
+    ('160', 'mp4', 'video-only', '256x144', [110], ['144p', '24fps', '4.04MiB', 'avc1.4d400c']),
+    ('278', 'webm', 'video-only', '256x144', [117], ['144p', '24fps', '5.27MiB', 'container', 'vp9', 'webm']),
+    ('242', 'webm', 'video-only', '426x240', [219], ['240p', '24fps', '8.51MiB', 'vp9']),
+    ('133', 'mp4', 'video-only', '426x240', [234], ['240p', '24fps', '8.38MiB', 'avc1.4d4015']),
+    ('243', 'webm', 'video-only', '640x360', [401], ['15.20MiB', '24fps', '360p', 'vp9']),
+    ('134', 'mp4', 'video-only', '640x360', [457], ['15.92MiB', '24fps', '360p', 'avc1.4d401e']),
+    ('244', 'webm', 'video-only', '854x480', [641], ['22.86MiB', '24fps', '480p', 'vp9']),
+    ('135', 'mp4', 'video-only', '854x480', [687], ['24.03MiB', '24fps', '480p', 'avc1.4d401e']),
+    ('136', 'mp4', 'video-only', '1280x720', [950], ['24fps', '34.61MiB', '720p', 'avc1.4d401f']),
+    ('247', 'webm', 'video-only', '1280x720', [1195], ['24fps', '42.46MiB', '720p', 'vp9']),
+    ('248', 'webm', 'video-only', '1920x1080', [2680], ['1080p', '124.98MiB', '24fps', 'vp9']),
+    ('137', 'mp4', 'video-only', '1920x1080', [3296], ['1080p', '125.73MiB', '24fps', 'avc1.640028']),
+    ('43', 'webm', 'both', '640x360', [128], ['44.09MiB', 'medium', 'vorbis', 'vp8.0']),
+    ('18', 'mp4', 'both', '640x360', [616, 96], ['32.39MiB', '44100Hz', 'avc1.42001E', 'medium', 'mp4a.40.2']),
+    ('22', 'mp4', 'both', '1280x720', [2178, 192], ['44100Hz', 'avc1.64001F', 'best', 'hd720', 'mp4a.40.2']),
+) == tuple(yield_ainfos(r"""
+format code  extension  resolution note
+249          webm       audio only DASH audio   71k , opus @ 50k, 2.56MiB
+250          webm       audio only DASH audio   93k , opus @ 70k, 3.24MiB
+140          m4a        audio only DASH audio  130k , m4a_dash container, mp4a.40.2@128k, 6.80MiB
+251          webm       audio only DASH audio  171k , opus @160k, 5.91MiB
+160          mp4        256x144    144p  110k , avc1.4d400c, 24fps, video only, 4.04MiB
+278          webm       256x144    144p  117k , webm container, vp9, 24fps, video only, 5.27MiB
+242          webm       426x240    240p  219k , vp9, 24fps, video only, 8.51MiB
+133          mp4        426x240    240p  234k , avc1.4d4015, 24fps, video only, 8.38MiB
+243          webm       640x360    360p  401k , vp9, 24fps, video only, 15.20MiB
+134          mp4        640x360    360p  457k , avc1.4d401e, 24fps, video only, 15.92MiB
+244          webm       854x480    480p  641k , vp9, 24fps, video only, 22.86MiB
+135          mp4        854x480    480p  687k , avc1.4d401e, 24fps, video only, 24.03MiB
+136          mp4        1280x720   720p  950k , avc1.4d401f, 24fps, video only, 34.61MiB
+247          webm       1280x720   720p 1195k , vp9, 24fps, video only, 42.46MiB
+248          webm       1920x1080  1080p 2680k , vp9, 24fps, video only, 124.98MiB
+137          mp4        1920x1080  1080p 3296k , avc1.640028, 24fps, video only, 125.73MiB
+43           webm       640x360    medium , vp8.0, vorbis@128k, 44.09MiB
+18           mp4        640x360    medium  616k , avc1.42001E, mp4a.40.2@ 96k (44100Hz), 32.39MiB
+22           mp4        1280x720   hd720 2178k , avc1.64001F, mp4a.40.2@192k (44100Hz) (best)
+""".strip('\n')))
+
+# From facebook.com.
+assert (
+    ('295505227957623ad', 'm4a', 'audio-only', None, [65], ['48000Hz', 'DASH', '[eng]', 'container', 'm4a_dash', 'mp4a.40.5']),
+    ('928452630836409v', 'mp4', 'video-only', '256x144', [111], ['DASH', '[eng]', 'avc1.4D401E', 'container', 'mp4_dash']),
+    ('482021539290178vd', 'mp4', 'video-only', '426x240', [301], ['DASH', '[eng]', 'avc1.4D401E', 'container', 'mp4_dash']),
+    ('2439523659427737v', 'mp4', 'video-only', '640x360', [1017], ['DASH', '[eng]', 'avc1.4D401E', 'container', 'mp4_dash']),
+    ('735153476916781v', 'mp4', 'video-only', '852x480', [1631], ['DASH', '[eng]', 'avc1.4D401F', 'container', 'mp4_dash']),
+    ('446115632656220v', 'mp4', 'video-only', '1280x720', [3223], ['DASH', '[eng]', 'avc1.4D401F', 'container', 'mp4_dash']),
+    ('2358600094466962v', 'mp4', 'video-only', '1920x1080', [7370], ['DASH', '[eng]', 'avc1.4D4028', 'container', 'mp4_dash']),
+) == tuple(yield_ainfos(r"""
+format code               extension  resolution note
+295505227957623ad         m4a        audio only [eng] DASH audio   65k , m4a_dash container, mp4a.40.5 (48000Hz)
+928452630836409v          mp4        256x144    [eng] DASH video  111k , mp4_dash container, avc1.4D401E, video only
+482021539290178vd         mp4        426x240    [eng] DASH video  301k , mp4_dash container, avc1.4D401E, video only
+2439523659427737v         mp4        640x360    [eng] DASH video 1017k , mp4_dash container, avc1.4D401E, video only
+735153476916781v          mp4        852x480    [eng] DASH video 1631k , mp4_dash container, avc1.4D401F, video only
+446115632656220v          mp4        1280x720   [eng] DASH video 3223k , mp4_dash container, avc1.4D401F, video only
+2358600094466962v         mp4        1920x1080  [eng] DASH video 7370k , mp4_dash container, avc1.4D4028, video only
+dash_sd_src               mp4        unknown
+dash_sd_src_no_ratelimit  mp4        unknown
+dash_hd_src               mp4        unknown    (best)
+""".strip('\n')))
 
 
 def get_dimens(vidres):
@@ -143,15 +231,41 @@ def get_best_format(data):
   #22           mp4        1280x720   hd720 , avc1.64001F, mp4a.40.2@192k (best)
 
 
+def fix_url(id_or_url):
+  match = YOUTUBE_VIDEO_URL_RE.match(id_or_url)  # Also matches just the ID.
+  if match:
+    return 'https://youtube.com/watch?v=' + match.group(1)
+  match = FACEBOOK_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    return 'https://facebook.com/%s/videos/%s' % (match.group(1), match.group(2))
+  match = ANY_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    print >>sys.stderr, 'warning; unknown site for video: %s' % id_or_url
+    return id_or_url  # Don't change https:// to http:// by default.
+  raise ValueError('Not a video ID or URL: %s' % id_or_url)
 
-def download_youtube_video(id_or_url):
-  if len(id_or_url) == 11:
-    prefix = 'youtube_%s_' % id_or_url
-    if [1 for e in os.listdir('.') if e.startswith(prefix)]:
-      print >>sys.stderr, 'info: skipping already downloaded: %s' % id_or_url
+
+def get_filename_prefix(id_or_url):
+  match = YOUTUBE_VIDEO_URL_RE.match(id_or_url)  # Also matches just the ID.
+  if match:
+    return 'youtube_%s_' % match.group(1)
+  match = FACEBOOK_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    return 'facebookvid_%s_' % match.group(2)
+  return None
+
+
+def download_video(id_or_url):
+  url = fix_url(id_or_url)
+  filename_prefix = get_filename_prefix(url)
+  if filename_prefix is not None:
+    if [1 for e in os.listdir('.') if e.startswith(filename_prefix)]:
+      print >>sys.stderr, 'info: skipping already downloaded: %s: %s: %s' % (
+          filename_prefix, id_or_url, url)
       return
+  del id_or_url
   p = subprocess.Popen(
-      ('youtube-dl', '-F', '--', id_or_url),
+      ('youtube-dl', '-F', '--', url),
       stdin=subprocess.PIPE, stdout=subprocess.PIPE)
   try:
     p.stdin.close()
@@ -163,12 +277,17 @@ def download_youtube_video(id_or_url):
     # RuntimeError: youtube-dl -F failed with exit code 1
     raise RuntimeError('youtube-dl -F failed with exit code %d' % exit_code)
   ext, format_spec = get_best_format(data)
-  tmp_prefix = 'youtubetmp.%d.' % os.getpid()
+  tmp_prefix = 'ptsviddltmp.%d.' % os.getpid()
   try:
     # We need the ~~~ delimiter because youtube-dl is trying to be smart and
     # appends .mp4 to the output filename after multiplexing.
-    cmd = ('youtube-dl', '-f', format_spec,
-           '-o', tmp_prefix + 'youtube_%(id)s_%(title)s...~~~', '--', id_or_url)
+    cmd = ['youtube-dl', '-f', format_spec]
+    if filename_prefix.startswith('facebookvid_'):
+      # Many retries after ``Connection reset by peer''.
+      cmd.extend(('-R', '200'))
+    else:
+      cmd.extend(('-R', '20'))
+    cmd.extend(('-o', tmp_prefix + DOWNLOADED_FILENAME_FORMAT, '--', url))
     print >>sys.stderr, 'info: downloading with: %s' % (
         ' '.join(map(pipes.quote, cmd)))
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -186,9 +305,9 @@ def download_youtube_video(id_or_url):
     match = DOWNLOADED_FILENAME_RE.match(filenames[0][len(tmp_prefix):])
     if not match:
       raise ValueError('Unrecognized downloaded filename: %s' % filenames[0])
-    youtube_id, title = match.group(1), match.group(2)
-    simple_title = get_simple_title(title)
-    saved_filename = 'youtube_%s_%s.%s' % (youtube_id, simple_title, ext)
+    video_id, title = match.group(1), match.group(2)
+    simple_title = get_simple_title(title, filename_prefix)
+    saved_filename = '%s%s.%s' % (filename_prefix, simple_title, ext)
     print >>sys.stderr, (
         'info: renaming downloaded video to: %s' % saved_filename)
     os.rename(filenames[0], saved_filename)
@@ -206,7 +325,7 @@ def main(argv):
   had_error = False
   for arg in argv[1:]:
     try:
-      download_youtube_video(arg)
+      download_video(arg)
     except (RuntimeError, ValueError), e:
       print >>sys.stderr, 'error: %s.%s: %s' % (
           e.__class__.__module__, e.__class__.__name__, e)
