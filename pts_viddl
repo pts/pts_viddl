@@ -37,6 +37,8 @@ import pipes
 import re
 import subprocess
 import sys
+import urllib
+
 
 def get_module_docstring():
   return __doc__
@@ -71,6 +73,7 @@ FACEBOOK_VIDEO_URL_RE = re.compile(
     r'https?://(?:\w+[.])?facebook[.]com/(?:([^/?&]+)/videos/(?:vl[.]\d+/)?|watch/[?]v=)(\d+)(?:[/?&]|\Z)')
 XHAMSTER_VIDEO_URL_RE = re.compile(
     r'https?://((?:\w+[.])?xhamster[.]com/videos/[^/?&]*-(\d+))(?:[/?]|\Z)')
+VIMEO_VIDEO_URL_RE = re.compile(r'https?://((?:\w+[.])?vimeo[.]com/(\d+)(?:/[0-9a-f]+)?)/*(?:(?s)#(.+))?\Z')
 ANY_VIDEO_URL_RE = re.compile(r'https?://(?:[^@/]*@)?([^#?%@:/&+]+)')
 
 
@@ -321,17 +324,20 @@ def get_bestfixed_format(data):
 def fix_url(id_or_url):
   match = YOUTUBE_VIDEO_URL_RE.match(id_or_url)  # Also matches just the ID.
   if match:
-    return 'https://youtube.com/watch?v=' + match.group(1)
+    return 'https://youtube.com/watch?v=' + match.group(1), ''
   match = FACEBOOK_VIDEO_URL_RE.match(id_or_url)
   if match:
-    return 'https://facebook.com/%s/videos/%s' % (match.group(1), match.group(2))
+    return 'https://facebook.com/%s/videos/%s' % (match.group(1), match.group(2)), ''
   match = XHAMSTER_VIDEO_URL_RE.match(id_or_url)
   if match:
-    return 'https://%s' % match.group(1)
+    return 'https://%s' % match.group(1), ''
+  match = VIMEO_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    return 'https://%s' % match.group(1), match.group(3) or ''
   match = ANY_VIDEO_URL_RE.match(id_or_url)
   if match:
     print >>sys.stderr, 'warning: unknown site for video: %s' % id_or_url
-    return id_or_url  # Don't change https:// to http:// by default.
+    return id_or_url, ''  # Don't change https:// to http:// by default.
   raise ValueError('Not a video ID or URL: %s' % id_or_url)
 
 
@@ -345,6 +351,9 @@ def get_filename_prefix(id_or_url):
   match = XHAMSTER_VIDEO_URL_RE.match(id_or_url)
   if match:
     return 'xhamster_%s_' % match.group(2)
+  match = VIMEO_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    return 'vimeo_%s_' % match.group(2)
   match = ANY_VIDEO_URL_RE.match(id_or_url)
   if match:
     # Convert es.xhamster.com to dlvid-xhamster-com_%(id)s_
@@ -370,7 +379,13 @@ def get_video_format_data(url):
 
 
 def download_video(id_or_url, format='bestfixed'):
-  url = fix_url(id_or_url)
+  url, title_prefix = fix_url(id_or_url)
+  if title_prefix:
+    title_prefix = get_simple_title(urllib.unquote_plus(title_prefix))
+  if title_prefix:
+    title_prefix += '_'
+  else:
+    title_prefix = ''
   filename_prefix = get_filename_prefix(url) or ''
   if filename_prefix and '%(' not in filename_prefix:
     if [1 for e in os.listdir('.') if e.startswith(filename_prefix)]:
@@ -379,11 +394,15 @@ def download_video(id_or_url, format='bestfixed'):
       return
   del id_or_url
   print >>sys.stderr, 'info: using prefix %s and URL %s' % (
-      filename_prefix, url)
+      filename_prefix + title_prefix, url)
   format_items = format.split('/')
   if format_items[0] == 'bestfixed':
-    data = get_video_format_data(url)
-    unused_ext, format_items[0] = get_bestfixed_format(data)
+    if 0 and filename_prefix.startswith('vimeo_'):
+      # By enabling this we'd get unplayable audio.
+      format_items[0] = 'best[width<=1920]'
+    else:
+      data = get_video_format_data(url)
+      unused_ext, format_items[0] = get_bestfixed_format(data)
   format = '/'.join(format_items)
   tmp_prefix = 'ptsviddltmp.%d.' % os.getpid()
   try:
@@ -417,7 +436,7 @@ def download_video(id_or_url, format='bestfixed'):
     if '%(' in filename_prefix:
       values = {'id': video_id, 'title': title, 'ext': ext}
       filename_prefix = filename_prefix % values  # Apply format template.
-    simple_title = get_simple_title(title, filename_prefix)
+    simple_title = title_prefix + get_simple_title(title, filename_prefix)
     saved_filename = '%s%s.%s' % (
         filename_prefix or 'dlvid_', simple_title, ext)
     i = 0
@@ -442,8 +461,10 @@ def download_video(id_or_url, format='bestfixed'):
 
 
 def query_video_format(id_or_url):
-  url = fix_url(id_or_url)
+  url, title_prefix = fix_url(id_or_url)
   sys.stdout.write(get_video_format_data(url))
+  if title_prefix:
+    sys.stdout.write('title_prefix: %s\n' % title_prefix)
 
 
 def main(argv):
