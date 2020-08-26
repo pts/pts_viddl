@@ -362,10 +362,25 @@ def get_filename_prefix(id_or_url):
   return None
 
 
+def get_cookie_args(url):
+  if '://youtube.com/' in url:
+    homedir = os.getenv('HOME', '')
+    if homedir and os.path.isdir(homedir):
+      filename = os.path.join(homedir, '.youtube_cookies.txt')
+      if os.path.isfile(filename):
+        # Using cookies fixes this youtube-dl error:
+        # ERROR: ???????????: YouTube said: Unable to extract video data
+        # https://github.com/ytdl-org/youtube-dl/issues/26152#issuecomment-674781915
+        return ('--cookies', filename)
+  return ()
+
+
 def get_video_format_data(url):
+  cmd = ['youtube-dl', '-F']
+  cmd.extend(get_cookie_args(url))
+  cmd.extend(('--', url))
   p = subprocess.Popen(
-      ('youtube-dl', '-F', '--', url),
-      stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+      cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
   try:
     p.stdin.close()
     data = p.stdout.read()
@@ -409,6 +424,7 @@ def download_video(id_or_url, format='bestfixed'):
     # We need the ~~~ delimiter because youtube-dl is trying to be smart and
     # appends .mp4 to the output filename after multiplexing.
     cmd = ['youtube-dl', '-f', format]
+    cmd.extend(get_cookie_args(url))
     if filename_prefix.startswith('facebookvid_'):
       # Many retries after ``Connection reset by peer''.
       cmd.extend(('-R', '200'))
