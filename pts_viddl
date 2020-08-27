@@ -375,6 +375,17 @@ def get_cookie_args(url):
   return ()
 
 
+def get_ffmpeg_args():
+  homedir = os.getenv('HOME', '')
+  if homedir:
+    # With any other filename:
+    # WARNING: Cannot identify executable /home/pts/.youtube_dl.ffmpeg, its basename should be one of avprobe, avconv, ffmpeg, ffprobe. Continuing without avconv/ffmpeg.
+    filename = os.path.join(homedir, '.viddl/ffmpeg')
+    if os.path.isfile(filename):
+      return ('--ffmpeg-location', filename)
+  return ()
+
+
 def get_video_format_data(url):
   cmd = ['youtube-dl', '-F']
   cmd.extend(get_cookie_args(url))
@@ -425,6 +436,7 @@ def download_video(id_or_url, format='bestfixed'):
     # appends .mp4 to the output filename after multiplexing.
     cmd = ['youtube-dl', '-f', format]
     cmd.extend(get_cookie_args(url))
+    cmd.extend(get_ffmpeg_args())
     if filename_prefix.startswith('facebookvid_'):
       # Many retries after ``Connection reset by peer''.
       cmd.extend(('-R', '200'))
