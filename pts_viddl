@@ -125,6 +125,13 @@ def yield_ainfos(data):
       continue
     format_code, format = items[:2]
     del items[:2]  # format_code and format.
+    items0, items = items, []
+    for item in items0:
+      ab = item.split('.', 1)
+      if len(ab) > 1 and ab[0] in ('mp4a', 'vp8', 'vp9', 'avc1', 'av01'):
+        items.extend(ab)
+      else:
+        items.append(item)
     rates = [int(match.group(1)) for item in items
              for match in (NUM_K_RE.match(item),) if match]
     if len(rates) == 1:
@@ -173,23 +180,23 @@ def yield_ainfos(data):
 assert (
     ('249', 'webm', 'audio-only', None, [71, 50], ['2.56MiB', 'DASH', 'opus']),
     ('250', 'webm', 'audio-only', None, [93, 70], ['3.24MiB', 'DASH', 'opus']),
-    ('140', 'm4a', 'audio-only', None, [130, 128], ['6.80MiB', 'DASH', 'container', 'm4a_dash', 'mp4a.40.2']),
+    ('140', 'm4a', 'audio-only', None, [130, 128], ['40.2', '6.80MiB', 'DASH', 'container', 'm4a_dash', 'mp4a']),
     ('251', 'webm', 'audio-only', None, [171, 160], ['5.91MiB', 'DASH', 'opus']),
-    ('160', 'mp4', 'video-only', '256x144', [110], ['24fps', '4.04MiB', 'avc1.4d400c']),
+    ('160', 'mp4', 'video-only', '256x144', [110], ['24fps', '4.04MiB', '4d400c', 'avc1']),
     ('278', 'webm', 'video-only', '256x144', [117], ['24fps', '5.27MiB', 'container', 'vp9', 'webm']),
     ('242', 'webm', 'video-only', '426x240', [219], ['24fps', '8.51MiB', 'vp9']),
-    ('133', 'mp4', 'video-only', '426x240', [234], ['24fps', '8.38MiB', 'avc1.4d4015']),
+    ('133', 'mp4', 'video-only', '426x240', [234], ['24fps', '4d4015', '8.38MiB', 'avc1']),
     ('243', 'webm', 'video-only', '640x360', [401], ['15.20MiB', '24fps', 'vp9']),
-    ('134', 'mp4', 'video-only', '640x360', [457], ['15.92MiB', '24fps', 'avc1.4d401e']),
+    ('134', 'mp4', 'video-only', '640x360', [457], ['15.92MiB', '24fps', '4d401e', 'avc1']),
     ('244', 'webm', 'video-only', '854x480', [641], ['22.86MiB', '24fps', 'vp9']),
-    ('135', 'mp4', 'video-only', '854x480', [687], ['24.03MiB', '24fps', 'avc1.4d401e']),
-    ('136', 'mp4', 'video-only', '1280x720', [950], ['24fps', '34.61MiB', 'avc1.4d401f']),
+    ('135', 'mp4', 'video-only', '854x480', [687], ['24.03MiB', '24fps', '4d401e', 'avc1']),
+    ('136', 'mp4', 'video-only', '1280x720', [950], ['24fps', '34.61MiB', '4d401f', 'avc1']),
     ('247', 'webm', 'video-only', '1280x720', [1195], ['24fps', '42.46MiB', 'vp9']),
     ('248', 'webm', 'video-only', '1920x1080', [2680], ['124.98MiB', '24fps', 'vp9']),
-    ('137', 'mp4', 'video-only', '1920x1080', [3296], ['125.73MiB', '24fps', 'avc1.640028']),
-    ('43', 'webm', 'both', '640x360', [128], ['44.09MiB', 'medium', 'vorbis', 'vp8.0']),
-    ('18', 'mp4', 'both', '640x360', [616, 96], ['32.39MiB', '44100Hz', 'avc1.42001E', 'medium', 'mp4a.40.2']),
-    ('22', 'mp4', 'both', '1280x720', [2178, 192], ['44100Hz', 'avc1.64001F', 'best', 'hd720', 'mp4a.40.2']),
+    ('137', 'mp4', 'video-only', '1920x1080', [3296], ['125.73MiB', '24fps', '640028', 'avc1']),
+    ('43', 'webm', 'both', '640x360', [128], ['0', '44.09MiB', 'medium', 'vorbis', 'vp8']),
+    ('18', 'mp4', 'both', '640x360', [616, 96], ['32.39MiB', '40.2', '42001E', '44100Hz', 'avc1', 'medium', 'mp4a']),
+    ('22', 'mp4', 'both', '1280x720', [2178, 192], ['40.2', '44100Hz', '64001F', 'avc1', 'best', 'hd720', 'mp4a']),
 ) == tuple(yield_ainfos(r"""
 format code  extension  resolution note
 249          webm       audio only DASH audio   71k , opus @ 50k, 2.56MiB
@@ -215,13 +222,13 @@ format code  extension  resolution note
 
 # From facebook.com.
 assert (
-    ('295505227957623ad', 'm4a', 'audio-only', None, [65], ['48000Hz', 'DASH', '[eng]', 'container', 'm4a_dash', 'mp4a.40.5']),
-    ('928452630836409v', 'mp4', 'video-only', '256x144', [111], ['DASH', '[eng]', 'avc1.4D401E', 'container', 'mp4_dash']),
-    ('482021539290178vd', 'mp4', 'video-only', '426x240', [301], ['DASH', '[eng]', 'avc1.4D401E', 'container', 'mp4_dash']),
-    ('2439523659427737v', 'mp4', 'video-only', '640x360', [1017], ['DASH', '[eng]', 'avc1.4D401E', 'container', 'mp4_dash']),
-    ('735153476916781v', 'mp4', 'video-only', '852x480', [1631], ['DASH', '[eng]', 'avc1.4D401F', 'container', 'mp4_dash']),
-    ('446115632656220v', 'mp4', 'video-only', '1280x720', [3223], ['DASH', '[eng]', 'avc1.4D401F', 'container', 'mp4_dash']),
-    ('2358600094466962v', 'mp4', 'video-only', '1920x1080', [7370], ['DASH', '[eng]', 'avc1.4D4028', 'container', 'mp4_dash']),
+    ('295505227957623ad', 'm4a', 'audio-only', None, [65], ['40.5', '48000Hz', 'DASH', '[eng]', 'container', 'm4a_dash', 'mp4a']),
+    ('928452630836409v', 'mp4', 'video-only', '256x144', [111], ['4D401E', 'DASH', '[eng]', 'avc1', 'container', 'mp4_dash']),
+    ('482021539290178vd', 'mp4', 'video-only', '426x240', [301], ['4D401E', 'DASH', '[eng]', 'avc1', 'container', 'mp4_dash']),
+    ('2439523659427737v', 'mp4', 'video-only', '640x360', [1017], ['4D401E', 'DASH', '[eng]', 'avc1', 'container', 'mp4_dash']),
+    ('735153476916781v', 'mp4', 'video-only', '852x480', [1631], ['4D401F', 'DASH', '[eng]', 'avc1', 'container', 'mp4_dash']),
+    ('446115632656220v', 'mp4', 'video-only', '1280x720', [3223], ['4D401F', 'DASH', '[eng]', 'avc1', 'container', 'mp4_dash']),
+    ('2358600094466962v', 'mp4', 'video-only', '1920x1080', [7370], ['4D4028', 'DASH', '[eng]', 'avc1', 'container', 'mp4_dash']),
     ('dash_sd_src', 'mp4', 'both', '0x0', [], ['unknown']),
     ('dash_sd_src_no_ratelimit', 'mp4', 'both', '0x0', [], ['unknown']),
     ('dash_hd_src', 'mp4', 'both', '0x0', [], ['best', 'unknown']),
@@ -282,7 +289,7 @@ def get_bestfixed_format(data):
   vid_list = sorted(
       (multiply(*parse_vidres(a[VIDRES])), int(a[XTYPE] == 'video-only'), (a[RATES] or (1,))[0], a[FORMAT_ID], a[FORMAT])
       for a in ainfos
-      if (a[FORMAT] == 'mp4' and a[XTYPE] in ('video-only', 'both'))
+      if (a[FORMAT] == 'mp4' and a[XTYPE] in ('video-only', 'both') and 'av01' not in a[ITEMS])
       or (a[FORMAT] not in ('mp4', 'webm') and a[XTYPE] == 'both'))
   # This can raise an IndexError, but in practice it won't, because not all
   # videos are larger than FullHD.
