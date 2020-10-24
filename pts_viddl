@@ -441,7 +441,7 @@ def download_video(id_or_url, format='bestfixed'):
   try:
     # We need the ~~~ delimiter because youtube-dl is trying to be smart and
     # appends .mp4 to the output filename after multiplexing.
-    cmd = ['youtube-dl', '-f', format]
+    cmd = ['youtube-dl', '-f', format, '--mark-watched']
     cmd.extend(get_cookie_args(url))
     cmd.extend(get_ffmpeg_args())
     if filename_prefix.startswith('facebookvid_'):
