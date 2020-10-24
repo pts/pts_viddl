@@ -62,7 +62,7 @@ SIMPLE_RE = re.compile(r'[^a-zA-Z0-9]+')
 
 DOWNLOADED_FILENAME_RE = re.compile(
     r'ptsviddl_(.*?)~~~[.][.][.](.*)[.][.][.]~~~[.](\w+)')
-DOWNLOADED_FILENAME_FORMAT = 'ptsviddl_%(id)s~~~...%(title)s...~~~.%(ext)s'
+DOWNLOADED_FILENAME_FORMAT = 'ptsviddl_%(id)s~~~...%(title).78s...~~~.%(ext)s'
 
 YOUTUBE_VIDEO_URL_RE = re.compile(
     r'(?:https?://(?:\w+[.])?(?:youtube[.]com)/watch[?]v=|'
