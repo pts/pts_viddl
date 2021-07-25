@@ -62,6 +62,8 @@ SIMPLE_RE = re.compile(r'[^a-zA-Z0-9]+')
 
 DOWNLOADED_FILENAME_RE = re.compile(
     r'ptsviddl_(.*?)~~~[.][.][.](.*)[.][.][.]~~~[.](\w+)')
+# 75 is too much, 60 is OK for http://youtube.com/watch?v=-Idz69OOqpc
+# Default: 78.
 DOWNLOADED_FILENAME_FORMAT = 'ptsviddl_%(id)s~~~...%(title).78s...~~~.%(ext)s'
 
 YOUTUBE_VIDEO_URL_RE = re.compile(
