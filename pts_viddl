@@ -413,6 +413,50 @@ def get_video_format_data(url):
   return data
 
 
+def download_video_yt_dlp(url, filename_prefix, entries):
+  prefix = filename_prefix + '+'
+  suffix = '.mp4'
+  matching_entries = [e for e in entries if e.startswith(prefix) and e.endswith(suffix)]
+  del entries
+  cmd = None
+  if not matching_entries:
+    # TODO(pts): Add --mark-watched?
+    cmd = [
+       'yt-dlp',
+       '-o', filename_prefix.replace('%', '%%') + '+%(title).100s.%(ext)s',
+       '-f', 'ba[ext!=webm]+bv[ext!=webm]', '-S', 'res:1080',
+    ]
+    cmd.extend(get_ffmpeg_args())
+    cmd.append(url)
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    try:
+      p.stdin.close()
+    finally:
+      exit_code = p.wait()
+    if exit_code:
+      raise RuntimeError('yt-dlp failed with exit code %d' % exit_code)
+    matching_entries = [e for e in os.listdir('.') if e.startswith(prefix) and e.endswith(suffix)]
+  if not matching_entries:
+    raise ValueError('No files downloaded.')
+  if len(matching_entries) > 1:
+    raise ValueError('Multiple files downloaded: %r' % (matching_entries,))
+  title = matching_entries[0][len(prefix) : -len(suffix)]
+  simple_title = get_simple_title(title, filename_prefix)
+  saved_filename = filename_prefix + simple_title + suffix
+  i = 0
+  while os.path.exists(saved_filename):
+    i += 1
+    # Don't overwrite existing files. (This detection has a race condition
+    # causing an unintended overwrite if multiple programs are creating
+    # files in the directory at the same time.)
+    saved_filename = '%s%s-%d%s' % (
+        filename_prefix or 'dlvid_', simple_title, i, suffix)
+  print >>sys.stderr, (
+      'info: renaming downloaded video to: %s' % saved_filename)
+  if matching_entries[0] != saved_filename:
+    os.rename(matching_entries[0], saved_filename)
+
+
 def download_video(id_or_url, format='bestfixed'):
   url, title_prefix = fix_url(id_or_url)
   if title_prefix:
@@ -422,14 +466,21 @@ def download_video(id_or_url, format='bestfixed'):
   else:
     title_prefix = ''
   filename_prefix = get_filename_prefix(url) or ''
+  entries = []
   if filename_prefix and '%(' not in filename_prefix:
-    if [1 for e in os.listdir('.') if e.startswith(filename_prefix)]:
+    entries = [e for e in os.listdir('.') if e.startswith(filename_prefix)]
+    if [1 for e in entries if e[len(filename_prefix) : len(filename_prefix) + 1] != '+']:
       print >>sys.stderr, 'info: skipping already downloaded: %s: %s: %s' % (
           filename_prefix, id_or_url, url)
       return
   del id_or_url
   print >>sys.stderr, 'info: using prefix %s and URL %s' % (
       filename_prefix + title_prefix, url)
+  if url.startswith('https://youtube.com/watch?v='):
+    return download_video_yt_dlp(url, filename_prefix, entries)
+  del entries
+  # Everything below uses youtube-dl (rather than yt-dlp), and thus is
+  # untested at Sun Dec 25 00:45:41 CET 2022.
   format_items = format.split('/')
   if format_items[0] == 'bestfixed':
     if 0 and filename_prefix.startswith('vimeo_'):
@@ -463,7 +514,7 @@ def download_video(id_or_url, format='bestfixed'):
       raise RuntimeError('youtube-dl failed with exit code %d' % exit_code)
     filenames = [e for e in os.listdir('.') if e.startswith(tmp_prefix)]
     if not filenames:
-      raise ValueError('Not files downloaded.')
+      raise ValueError('No files downloaded.')
     if len(filenames) > 1:
       raise ValueError('Multiple files downloaded: %r' % (filenames,))
     match = DOWNLOADED_FILENAME_RE.match(filenames[0][len(tmp_prefix):])
