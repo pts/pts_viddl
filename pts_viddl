@@ -427,14 +427,17 @@ def get_video_format_data(url):
   return data
 
 
-def download_video_yt_dlp(url, filename_prefix, entries):
+def download_video_yt_dlp(url, filename_prefix, entries, force_tiktok_id):
+  if force_tiktok_id is not None and filename_prefix.startswith('tiktok_'):
+    filename_prefix = 'tiktok_%s_' % force_tiktok_id
+    entries = os.listdir('.')
   prefix = filename_prefix + '+'
   suffix = '.mp4'
-  matching_entries = [e for e in entries if e.startswith(prefix) and e.endswith(suffix)]
-  del entries
   cmd = None
   force_title = None
   expected_file_count = 1
+  matching_entries = [e for e in entries if e.startswith(prefix) and e.endswith(suffix)]
+  del entries
   if matching_entries:
     if filename_prefix.startswith('tiktok_'):
       if not os.path.isfile(filename_prefix + '+.ytd_just_h264'):
@@ -608,7 +611,7 @@ def download_video_yt_dlp(url, filename_prefix, entries):
       pass
 
 
-def download_video(id_or_url, format='bestfixed'):
+def download_video(id_or_url, format='bestfixed', force_tiktok_id=None):
   url, title_prefix = fix_url(id_or_url)
   if title_prefix:
     title_prefix = get_simple_title(urllib.unquote_plus(title_prefix))
@@ -630,7 +633,7 @@ def download_video(id_or_url, format='bestfixed'):
       filename_prefix + title_prefix, url)
   if (filename_prefix.startswith('youtube_') or
       filename_prefix.startswith('tiktok_')):
-    return download_video_yt_dlp(url, filename_prefix, entries)
+    return download_video_yt_dlp(url, filename_prefix, entries, force_tiktok_id)
   del entries
   # Everything below uses youtube-dl (rather than yt-dlp), and thus is
   # untested at Sun Dec 25 00:45:41 CET 2022.
@@ -715,6 +718,7 @@ def main(argv):
   format = 'bestfixed'
   is_format_query = False
   i = 1
+  force_tiktok_id = None
   while i < len(argv):
     arg = argv[i]
     if arg == '-' or not arg.startswith('-'):
@@ -729,6 +733,11 @@ def main(argv):
       i += 1
     elif arg == '-F':
       is_format_query = True
+    elif arg == '--force-tiktok-id':
+      if i == len(argv):
+        sys.exit('fatal: missing argument of: %s' % arg)
+      force_tiktok_id = argv[i]
+      i += 1
     else:
       sys.exit('fatal: unknown command-line flag: %s' % arg)
 
@@ -738,7 +747,7 @@ def main(argv):
       if is_format_query:
         query_video_format(id_or_url)
       else:
-        download_video(id_or_url, format)
+        download_video(id_or_url, format, force_tiktok_id)
     except (RuntimeError, ValueError), e:
       print >>sys.stderr, 'error: %s.%s: %s' % (
           e.__class__.__module__, e.__class__.__name__, e)
