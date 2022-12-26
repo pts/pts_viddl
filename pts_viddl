@@ -434,10 +434,15 @@ def download_video_yt_dlp(url, filename_prefix, entries):
   del entries
   cmd = None
   force_title = None
-  if not matching_entries:
-    cmds = []
+  expected_file_count = 1
+  if matching_entries:
+    if filename_prefix.startswith('tiktok_'):
+      if not os.path.isfile(filename_prefix + '+.ytd_just_h264'):
+        expected_file_count = 2
+  if len(matching_entries) != expected_file_count:
     if filename_prefix.startswith('youtube_'):
       # TODO(pts): Add --mark-watched for YouTube, just like the old one.
+      # TODO(pts): Download to temporary file, rename on success. For Ctrl-<C>.
       cmd = [
          'yt-dlp',
           '--print-to-file', '%(title)s', filename_prefix.replace('%', '%%') + '+.ytd',
@@ -446,13 +451,23 @@ def download_video_yt_dlp(url, filename_prefix, entries):
       ]
       cmd.extend(get_ffmpeg_args())
       cmd.append(url)
-      cmds.append(cmd)
+      p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+      try:
+        p.stdin.close()
+      finally:
+        exit_code = p.wait()
+      if exit_code:
+        raise RuntimeError('yt-dlp failed with exit code %d' % exit_code)
     elif filename_prefix.startswith('tiktok_'):
       # `[format_id!=play_addr]' is there to skip downloading image
       # slideshows as audio-only .mp4 files with best[ext=mp4][vcodec=h264].
       # This error will be reported: ERROR: [TikTok] 1234...: Requested format is not available. Use --list-formats for a list of available formats
       #
       # `[format_id!^=download_addr]' is there to skip watermarked videos.
+      #
+      # TODO(pts): Download to temporary file, rename on success. For Ctrl-<C>.
+      #
+      # TODO(pts): Report this as permanent failure (exit(102)): ERROR: [TikTok] ...: Unable to download webpage: HTTP Error 404: Not Found
       cmd = [
           'yt-dlp',
           '--print-to-file', '%(id)s_%(uploader)s,,%(title)s', filename_prefix.replace('%', '%%') + '+.ytd',
@@ -462,7 +477,14 @@ def download_video_yt_dlp(url, filename_prefix, entries):
       ]
       cmd.extend(get_ffmpeg_args())
       cmd.append(url)
-      cmds.append(cmd)
+      p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+      try:
+        p.stdin.close()
+      finally:
+        exit_code = p.wait()
+      if exit_code:
+        raise RuntimeError('yt-dlp failed with exit code %d' % exit_code)
+      expected_file_count = 2
       cmd = [
           'yt-dlp',
           '--print-to-file', '%(id)s_%(uploader)s,,%(title)s', filename_prefix.replace('%', '%%') + '+.ytd',
@@ -471,17 +493,57 @@ def download_video_yt_dlp(url, filename_prefix, entries):
       ]
       cmd.extend(get_ffmpeg_args())
       cmd.append(url)
-      cmds.append(cmd)
-    else:
-      raise ValueError('Unknown hosting platform: ' + filename_prefix)
-    for cmd in cmds:
       p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
       try:
         p.stdin.close()
       finally:
         exit_code = p.wait()
       if exit_code:
-        raise RuntimeError('yt-dlp failed with exit code %d' % exit_code)
+        # Some videos are available only in H.264 (vcodec=h264). If that's the case, don't fail.
+        # Error message for the 2nd cmd: ERROR: [TikTok] 1233...: Requested format is not available. Use --list-formats for a list of available formats
+        #
+        # Example output of `yt-dlp -F':
+        # [vm.tiktok] ...: Downloading webpage
+        # [TikTok] 1234...: Downloading video feed
+        # [info] Available formats for ...:
+        # ID                 EXT RESOLUTION |   FILESIZE  TBR PROTO | VCODEC  VBR ACODEC ABR MORE INFO
+        # --------------------------------------------------------------------------------------------------------------------
+        # download_addr-0    mp4 576x1024   |    1.96MiB      https | h264        aac        Download video, watermarked (API)
+        # download_addr-1    mp4 576x1024   |    1.96MiB      https | h264        aac        Download video, watermarked
+        # download_addr-2    mp4 576x1024   |    1.96MiB      https | h264        aac        Download video, watermarked
+        # h264_540p_432649-0 mp4 576x1024   |  808.05KiB 432k https | h264   432k aac     0k Playback video (API)
+        # h264_540p_432649-1 mp4 576x1024   |  808.05KiB 432k https | h264   432k aac     0k Playback video
+        # h264_540p_432649-2 mp4 576x1024   |  808.05KiB 432k https | h264   432k aac     0k Playback video
+        # h264_540p_571287-0 mp4 576x1024   |    1.04MiB 571k https | h264   571k aac     0k Playback video (API)
+        # h264_540p_571287-1 mp4 576x1024   |    1.04MiB 571k https | h264   571k aac     0k Playback video
+        # h264_540p_571287-2 mp4 576x1024   |    1.04MiB 571k https | h264   571k aac     0k Playback video
+        # h264_540p_955069-0 mp4 576x1024   |    1.74MiB 955k https | h264   955k aac     0k Direct video (API)
+        # h264_540p_955069-1 mp4 576x1024   |    1.74MiB 955k https | h264   955k aac     0k Direct video
+        # h264_540p_955069-2 mp4 576x1024   |    1.74MiB 955k https | h264   955k aac     0k Direct video
+        cmd = ('yt-dlp', '-F', url)
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        try:
+          p.stdin.close()
+          data = p.stdout.read()
+        finally:
+          exit_code2 = p.wait()
+        if exit_code2 == 0:
+          state = h264_count = non_h264_count = 0
+          for line in data.split('\n'):
+            if line.startswith('---'):
+              state = 1
+            elif state and not line.startswith('download_addr') and not line.startswith('play_addr') and ' mp4 ' in line:
+              if line.startswith('h264_') or ' h264 ' in line:
+                h264_count += 1
+              else:
+                non_h264_count += 1
+          if h264_count and not non_h264_count:  # Only h264 videos found.
+            expected_file_count = 1
+            open(filename_prefix + '+.ytd_just_h264', 'a').close()
+        if expected_file_count != 1:
+          raise RuntimeError('yt-dlp failed with exit code %d' % exit_code)
+    else:
+      raise ValueError('Unknown hosting platform: ' + filename_prefix)
     matching_entries = [e for e in os.listdir('.') if e.startswith(prefix) and e.endswith(suffix)]
   if filename_prefix.startswith('tiktok_'):
     try:
@@ -496,7 +558,7 @@ def download_video_yt_dlp(url, filename_prefix, entries):
       pass
   if not matching_entries:
     raise ValueError('No files downloaded.')
-  if len(matching_entries) != 1 + filename_prefix.startswith('tiktok_'):  # For TikTok, we require 2 downloaded files: *.h265.mp4 and *..mp4.
+  if len(matching_entries) != expected_file_count:
     raise ValueError('Multiple files downloaded: %r' % (matching_entries,))
   for filename in matching_entries:
     if filename.startswith('tiktok_') and filename.endswith('..mp4'):
@@ -535,10 +597,11 @@ def download_video_yt_dlp(url, filename_prefix, entries):
         'info: renaming downloaded video to: %s' % saved_filename)
     if filename != saved_filename:
       os.rename(filename, saved_filename)
-  try:
-    os.remove(filename_prefix + '+.ytd')
-  except OSError:
-    pass
+  for suffix in ('+.ytd', '+.ytd_just_h264'):
+    try:
+      os.remove(filename_prefix + suffix)
+    except OSError:
+      pass
 
 
 def download_video(id_or_url, format='bestfixed'):
