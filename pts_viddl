@@ -443,6 +443,8 @@ def download_video_yt_dlp(url, filename_prefix, entries):
     if filename_prefix.startswith('youtube_'):
       # TODO(pts): Add --mark-watched for YouTube, just like the old one.
       # TODO(pts): Download to temporary file, rename on success. For Ctrl-<C>.
+      if os.getenv('VIDDL_YOUTUBE_PFAIL', ''):
+        sys.exit(102)  # Simulate permanent failure.
       cmd = [
          'yt-dlp',
           '--print-to-file', '%(title)s', filename_prefix.replace('%', '%%') + '+.ytd',
@@ -468,6 +470,8 @@ def download_video_yt_dlp(url, filename_prefix, entries):
       # TODO(pts): Download to temporary file, rename on success. For Ctrl-<C>.
       #
       # TODO(pts): Report this as permanent failure (exit(102)): ERROR: [TikTok] ...: Unable to download webpage: HTTP Error 404: Not Found
+      if os.getenv('VIDDL_TIKTOK_PFAIL', ''):
+        sys.exit(102)  # Simulate permanent failure.
       cmd = [
           'yt-dlp',
           '--print-to-file', '%(id)s_%(uploader)s,,%(title)s', filename_prefix.replace('%', '%%') + '+.ytd',
