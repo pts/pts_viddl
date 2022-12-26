@@ -76,6 +76,8 @@ FACEBOOK_VIDEO_URL_RE = re.compile(
 XHAMSTER_VIDEO_URL_RE = re.compile(
     r'https?://((?:\w+[.])?xhamster[.]com/videos/[^/?&]*-(\d+))(?:[/?]|\Z)')
 VIMEO_VIDEO_URL_RE = re.compile(r'https?://((?:\w+[.])?vimeo[.]com/(\d+)(?:/[0-9a-f]+)?)/*(?:(?s)#(.+))?\Z')
+TIKTOK_LONG_VIDEO_URL_RE = re.compile(r'https?://(?:\w+[.])?tiktok[.]com/[@]([^/?&#]+)/video/(\d{16,})(?:[/?]|\Z)')
+TIKTOK_SHORT_VIDEO_URL_RE = re.compile(r'https?://vm[.]tiktok[.]com/([a-zA-Z0-9]+)(?:[/?]|\Z)')
 ANY_VIDEO_URL_RE = re.compile(r'https?://(?:[^@/]*@)?([^#?%@:/&+]+)')
 
 
@@ -334,6 +336,12 @@ def fix_url(id_or_url):
   match = YOUTUBE_VIDEO_URL_RE.match(id_or_url)  # Also matches just the ID.
   if match:
     return 'https://youtube.com/watch?v=' + match.group(1), ''
+  match = TIKTOK_SHORT_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    return 'https://vm.tiktok.com/%s/' % match.group(1), ''
+  match = TIKTOK_LONG_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    return 'https://www.tiktok.com/@%s/video/%s' % (match.group(1), match.group(2)), ''
   match = FACEBOOK_VIDEO_URL_RE.match(id_or_url)
   if match:
     return 'https://facebook.com/%s/videos/%s' % (match.group(1), match.group(2)), ''
@@ -354,6 +362,12 @@ def get_filename_prefix(id_or_url):
   match = YOUTUBE_VIDEO_URL_RE.match(id_or_url)  # Also matches just the ID.
   if match:
     return 'youtube_%s_' % match.group(1)
+  match = TIKTOK_SHORT_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    return 'tiktok_%s_' % match.group(1)
+  match = TIKTOK_LONG_VIDEO_URL_RE.match(id_or_url)
+  if match:
+    return 'tiktok_%s_' % match.group(2)
   match = FACEBOOK_VIDEO_URL_RE.match(id_or_url)
   if match:
     return 'facebookvid_%s_' % match.group(2)
@@ -419,42 +433,112 @@ def download_video_yt_dlp(url, filename_prefix, entries):
   matching_entries = [e for e in entries if e.startswith(prefix) and e.endswith(suffix)]
   del entries
   cmd = None
+  force_title = None
   if not matching_entries:
-    # TODO(pts): Add --mark-watched?
-    cmd = [
-       'yt-dlp',
-       '-o', filename_prefix.replace('%', '%%') + '+%(title).100s.%(ext)s',
-       '-f', 'ba[ext!=webm]+bv[ext!=webm]', '-S', 'res:1080',
-    ]
-    cmd.extend(get_ffmpeg_args())
-    cmd.append(url)
-    p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    try:
-      p.stdin.close()
-    finally:
-      exit_code = p.wait()
-    if exit_code:
-      raise RuntimeError('yt-dlp failed with exit code %d' % exit_code)
+    cmds = []
+    if filename_prefix.startswith('youtube_'):
+      # TODO(pts): Add --mark-watched for YouTube, just like the old one.
+      cmd = [
+         'yt-dlp',
+          '--print-to-file', '%(title)s', filename_prefix.replace('%', '%%') + '+.ytd',
+         '-o', filename_prefix.replace('%', '%%') + '+%(title).100s.%(ext)s',
+         '-f', 'ba[ext!=webm]+bv[ext!=webm]', '-S', 'res:1080',
+      ]
+      cmd.extend(get_ffmpeg_args())
+      cmd.append(url)
+      cmds.append(cmd)
+    elif filename_prefix.startswith('tiktok_'):
+      # `[format_id!=play_addr]' is there to skip downloading image
+      # slideshows as audio-only .mp4 files with best[ext=mp4][vcodec=h264].
+      # This error will be reported: ERROR: [TikTok] 1234...: Requested format is not available. Use --list-formats for a list of available formats
+      #
+      # `[format_id!^=download_addr]' is there to skip watermarked videos.
+      cmd = [
+          'yt-dlp',
+          '--print-to-file', '%(id)s_%(uploader)s,,%(title)s', filename_prefix.replace('%', '%%') + '+.ytd',
+          # mplayer2 can't play H.265 (vcodec=h265), which is the highest resolution for TikTok.
+          '-o', filename_prefix.replace('%', '%%') + '+%(id)s_%(uploader)s,,%(title).100s.h264.%(ext)s',
+          '-f', 'best[ext=mp4][vcodec=h264][format_id!=play_addr][format_id!^=download_addr]',
+      ]
+      cmd.extend(get_ffmpeg_args())
+      cmd.append(url)
+      cmds.append(cmd)
+      cmd = [
+          'yt-dlp',
+          '--print-to-file', '%(id)s_%(uploader)s,,%(title)s', filename_prefix.replace('%', '%%') + '+.ytd',
+          '-o', filename_prefix.replace('%', '%%') + '+%(id)s_%(uploader)s,,%(title).100s..%(ext)s',
+          '-f', 'best[ext=mp4][vcodec!=h264][format_id!=play_addr][format_id!^=download_addr]',
+      ]
+      cmd.extend(get_ffmpeg_args())
+      cmd.append(url)
+      cmds.append(cmd)
+    else:
+      raise ValueError('Unknown hosting platform: ' + filename_prefix)
+    for cmd in cmds:
+      p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+      try:
+        p.stdin.close()
+      finally:
+        exit_code = p.wait()
+      if exit_code:
+        raise RuntimeError('yt-dlp failed with exit code %d' % exit_code)
     matching_entries = [e for e in os.listdir('.') if e.startswith(prefix) and e.endswith(suffix)]
+  if filename_prefix.startswith('tiktok_'):
+    try:
+      f = open(filename_prefix + '+.ytd')
+      try:
+        force_title = f.read().rstrip('\r\n')
+        if not force_title:
+          force_title = None
+      finally:
+        f.close()
+    except (IOError, OSError):
+      pass
   if not matching_entries:
     raise ValueError('No files downloaded.')
-  if len(matching_entries) > 1:
+  if len(matching_entries) != 1 + filename_prefix.startswith('tiktok_'):  # For TikTok, we require 2 downloaded files: *.h265.mp4 and *..mp4.
     raise ValueError('Multiple files downloaded: %r' % (matching_entries,))
-  title = matching_entries[0][len(prefix) : -len(suffix)]
-  simple_title = get_simple_title(title, filename_prefix)
-  saved_filename = filename_prefix + simple_title + suffix
-  i = 0
-  while os.path.exists(saved_filename):
-    i += 1
-    # Don't overwrite existing files. (This detection has a race condition
-    # causing an unintended overwrite if multiple programs are creating
-    # files in the directory at the same time.)
-    saved_filename = '%s%s-%d%s' % (
-        filename_prefix or 'dlvid_', simple_title, i, suffix)
-  print >>sys.stderr, (
-      'info: renaming downloaded video to: %s' % saved_filename)
-  if matching_entries[0] != saved_filename:
-    os.rename(matching_entries[0], saved_filename)
+  for filename in matching_entries:
+    if filename.startswith('tiktok_') and filename.endswith('..mp4'):
+      suffix2 = '..mp4'
+    elif filename.startswith('tiktok_') and filename.endswith('.h264.mp4'):
+      suffix2 = '.h264.mp4'
+    else:
+      suffix2 = suffix  # '.mp4'.
+    if force_title is None:
+      title = filename[len(prefix) : -len(suffix2)]
+    else:
+      title = force_title  # force_title is longer, it doesn't have the %(title).100s limit to avoid the ``File name too long'' error.
+    if filename.startswith('tiktok_'):  # Keep the first ',,'.
+      i = title.find(',,') + 2
+      if i >= 2:
+        simple_title = title[:i] + get_simple_title(title[i:], filename_prefix)
+      else:
+        simple_title = get_simple_title(title, filename_prefix)
+    else:
+      simple_title = get_simple_title(title, filename_prefix)
+    max_title_size = 255 - len(filename_prefix) - len(suffix2) - 10  # Linux ext4 filesystem can do <=255 characters per pathname component. 10 is for appending later.
+    if len(simple_title) > max_title_size:
+      while max_title_size > 0 and 0x80 <= ord(simple_title[max_title_size]) <= 0xbf:  # Remove byte from partial UTF-8 character. Usually not needed, because get_simple_title(...) returns ASCII.
+        max_title_size -= 1
+      simple_title = simple_title[:max_title_size]
+    saved_filename = filename_prefix + simple_title + suffix2
+    i = 0
+    while os.path.exists(saved_filename):
+      i += 1
+      # Don't overwrite existing files. (This detection has a race condition
+      # causing an unintended overwrite if multiple programs are creating
+      # files in the directory at the same time.)
+      saved_filename = '%s%s-%d%s' % (
+          filename_prefix or 'dlvid_', simple_title, i, suffix)
+    print >>sys.stderr, (
+        'info: renaming downloaded video to: %s' % saved_filename)
+    if filename != saved_filename:
+      os.rename(filename, saved_filename)
+  try:
+    os.remove(filename_prefix + '+.ytd')
+  except OSError:
+    pass
 
 
 def download_video(id_or_url, format='bestfixed'):
@@ -469,14 +553,16 @@ def download_video(id_or_url, format='bestfixed'):
   entries = []
   if filename_prefix and '%(' not in filename_prefix:
     entries = [e for e in os.listdir('.') if e.startswith(filename_prefix)]
-    if [1 for e in entries if e[len(filename_prefix) : len(filename_prefix) + 1] != '+']:
+    if [1 for e in entries if e[len(filename_prefix) : len(filename_prefix) + 1] != '+' and
+        not e.endswith('.lst') and not e.endswith('.txt')]:
       print >>sys.stderr, 'info: skipping already downloaded: %s: %s: %s' % (
           filename_prefix, id_or_url, url)
       return
   del id_or_url
   print >>sys.stderr, 'info: using prefix %s and URL %s' % (
       filename_prefix + title_prefix, url)
-  if url.startswith('https://youtube.com/watch?v='):
+  if (filename_prefix.startswith('youtube_') or
+      filename_prefix.startswith('tiktok_')):
     return download_video_yt_dlp(url, filename_prefix, entries)
   del entries
   # Everything below uses youtube-dl (rather than yt-dlp), and thus is
